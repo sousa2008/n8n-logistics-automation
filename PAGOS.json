@@ -1,0 +1,439 @@
+{
+  "name": "PAGOS (CONCLUÍDO)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cf8ff3ea-28fa-41bf-a05a-31260c002e30",
+      "name": "INICIAR CONFERENCIA"
+    },
+    {
+      "parameters": {
+        "content": "## LER RELATÓRIO PEPSICO\nGuarda os bytes em uma variavel $bytes e depois converte para base64"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -208
+      ],
+      "id": "1a8c97df-6b08-463d-80ce-8c07d8d3e529",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "command": "powershell -NoProfile -Command \"$bytes=[IO.File]::ReadAllBytes('\\ENDERECO-AQUI\\relatorio-pagos\\reporte-pagos.xls'); [Convert]::ToBase64String($bytes)\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "2c1fbe81-70f6-439f-a1e2-b54f1a209dd6",
+      "name": "LER RELATÓRIO PEPSICO"
+    },
+    {
+      "parameters": {
+        "operation": "xls",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        656,
+        0
+      ],
+      "id": "dbf17992-34ac-40e1-b50a-3d60f0edb14b",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base64 = $input.first().json.stdout;  // pega a saída em base64\n\nreturn {\n  json: {\n    arquivo: 'reporte-pagos.xls'\n  },      // retorna um nove para o arquivo e os dados abaixo\n  binary: {\n    data: {\n      data: base64.trim(),    //conteudo em base64\n      mimeType: 'application/vnd.ms-excel',  //indica que é xls\n      fileName: 'reporte-pagos.xls'   \n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "f36372d8-6027-4ba3-8102-8599648ecc40",
+      "name": "CONVERTER PARA JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(item => {\n  const referencia = String(item.json[\"Referência\"] ?? \"\").trim(); \n  //pega somente o campo referencia do JSON\n \n  return referencia.startsWith(\"2\"); // Só NF\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "81e23f8f-056d-4bae-bb34-dba15adc6af9",
+      "name": "PEGAR NF"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const referencia = String(item.json[\"Referência\"] ?? \"\").trim();\n\n  const nf = referencia   // Separa o numero da nf, tirando 0\n    .split(\"-\")[0]\n    .replace(/^0+/, \"\");\n\n  return {\n    json: {\n      ...item.json,\n      NF: nf   // retorna o numero formatado \n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "7bb4f932-a222-49e8-947f-c4091ad19fc1",
+      "name": "LIMPAR NF"
+    },
+    {
+      "parameters": {
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/ID-PLANILHA-AQUI?includeGridData=false",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1312,
+        0
+      ],
+      "id": "36d25773-d75d-411b-9a07-fcbd4f935f97",
+      "name": "HTTP Request",
+      "executeOnce": true,
+      "ID-GOOGLE-AQUI": {
+        "googleApi": {
+          "id": "5EX7GUYll58mHK8C",
+          "name": "Google Service Account account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega aquele JSON gigante do nó anterior\nconst googleData = $input.first().json;\n\n// Extrai apenas o Nome e o ID interno de cada aba (precisaremos do ID para pintar de ciano depois)\nconst abas = googleData.sheets.map(aba => ({\n  nome: aba.properties.title,\n  id: aba.properties.sheetId\n}));\n\n// Resgata todas as NFs limpas que ficaram paradas lá no nó 'LIMPAR NF'\nconst notasParaProcurar = $('LIMPAR NF').all().map(item => item.json.NF);\n\nreturn {\n  json: {\n    resumo: `Vamos procurar ${notasParaProcurar.length} notas em ${abas.length} abas.`,\n    listaAbas: abas,\n    notas: notasParaProcurar\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        0
+      ],
+      "id": "1a47fcc3-a0b5-4c57-89ba-d0267792138b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dados = $input.first().json;\n\n// Prepara a lista de busca no formato JSON que o Google exige\nconst dataFilters = dados.listaAbas.map(aba => ({\n  a1Range: `'${aba.nome}'!J:J`\n}));\n\nreturn {\n  json: {\n    listaAbas: dados.listaAbas,\n    notas: dados.notas,\n    bodyBusca: {\n      dataFilters: dataFilters\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "38b876ae-f52f-4283-aec3-13a8a718b77a",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/ID-PLANILHA-AQUI/values:batchGetByDataFilter",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.bodyBusca) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1984,
+        0
+      ],
+      "id": "c897e060-7cbd-4dec-abec-9487051cc576",
+      "name": "HTTP Request1",
+      "executeOnce": true,
+      "ID-GOOGLE-AQUI": {
+        "googleApi": {
+          "id": "5EX7GUYll58mHK8C",
+          "name": "Google Service Account account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega a resposta com as colunas J que acabaram de chegar\nconst googleResponse = $input.first().json;\n\n// AQUI: Coloque o nome exato do seu nó Code que gerou a listaAbas.\n// Pela sua imagem anterior, deve ser 'Code in JavaScript1'. Se for outro, mude abaixo.\nconst dadosPreparados = $('Code in JavaScript1').first().json; \nconst notasParaProcurar = dadosPreparados.notas;\nconst listaAbas = dadosPreparados.listaAbas;\n\nconst notasEncontradas = [];\nconst formatRequests = [];\n\n// Vamos caçar cada uma das notas\nfor (const nota of notasParaProcurar) {\n  for (const abaData of googleResponse.valueRanges) {\n    if (!abaData.valueRange || !abaData.valueRange.values) continue;\n\n    const colValues = abaData.valueRange.values;\n    // Tira as aspas simples do nome da aba (ex: \"'KIKO - 24TL'\" vira \"KIKO - 24TL\")\n    const nomeAbaBruto = abaData.valueRange.range.split('!')[0].replace(/'/g, '');\n\n    // Procura em qual linha está\n    const rowIndex = colValues.findIndex(row => {\n      if (row && row.length > 0) {\n        // Limpa o valor da célula da mesma forma que fizemos com a nota\n        // Pega o valor, separa no \"-\" e tira os zeros iniciais\n        const valorCelula = String(row[0]).split('-')[0].replace(/^0+/, '').trim();\n        return valorCelula === String(nota).trim();\n      }\n      return false;\n    });\n\n    if (rowIndex !== -1) {\n      // Achou a nota! Vamos pegar o ID da aba\n      const sheetIdObj = listaAbas.find(a => a.nome === nomeAbaBruto);\n      \n      if (sheetIdObj) {\n        notasEncontradas.push({\n          nota: nota,\n          aba: nomeAbaBruto,\n          linhaExcel: rowIndex + 1\n        });\n\n        // Cria a ordem para o Google pintar a célula de Ciano\n        // Ciano = Red: 0, Green: 1, Blue: 1\n        // Coluna J no Google equivale ao índice Numérico 9\n        formatRequests.push({\n          repeatCell: {\n            range: {\n              sheetId: sheetIdObj.id,\n              startRowIndex: rowIndex,      // Index 0 = Linha 1\n              endRowIndex: rowIndex + 1,    // Pinta só essa linha\n              startColumnIndex: 9,          // Começa na Coluna J\n              endColumnIndex: 10            // Termina na Coluna J\n            },\n            cell: {\n              userEnteredFormat: {\n                backgroundColor: { red: 0.0, green: 1.0, blue: 1.0 }\n              }\n            },\n            fields: \"userEnteredFormat.backgroundColor\"\n          }\n        });\n      }\n      break; // Já achamos a nota, pode parar de procurar ela nas outras abas\n    }\n  }\n}\n\nreturn {\n  json: {\n    resumo: `De ${notasParaProcurar.length} notas buscadas, encontramos ${formatRequests.length} na planilha da MA2!`,\n    notasEncontradas: notasEncontradas,\n    bodyPintar: {\n      requests: formatRequests\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        0
+      ],
+      "id": "273edbc5-e4f8-48b6-8eb5-b6c6b71f6999",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/ID-PLANILHA-AQUI:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.bodyPintar) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2464,
+        0
+      ],
+      "id": "d8173b2a-bcb2-4656-ab7f-c59ec20fb2cf",
+      "name": "HTTP Request2",
+      "ID-GOOGLE-AQUI": {
+        "googleApi": {
+          "id": "5EX7GUYll58mHK8C",
+          "name": "Google Service Account account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega a lista de notas que foram pintadas de ciano com sucesso\nconst encontradas = $input.first().json.notasEncontradas.map(item => String(item.nota));\n\n// Pega TODOS os dados originais, com data, valor e quantidade, lá do nó 'LIMPAR NF'\nconst todasAsNotasOriginais = $('LIMPAR NF').all();\n\n// O Filtro: mantemos apenas as notas originais que NÃO estão na lista das encontradas\nconst faltantes = todasAsNotasOriginais.filter(item => {\n  const notaLimpa = String(item.json.NF);\n  return !encontradas.includes(notaLimpa); // Se não incluiu, é faltante\n});\n\n// Se não tiver faltantes, ele retorna vazio (e o fluxo encerra feliz)\nreturn faltantes;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        352
+      ],
+      "id": "4efc8b1e-e161-4da8-92e0-838821440efb",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        352
+      ],
+      "id": "88d50a64-daf8-40ab-a1cd-e72a0c36cc66",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o arquivo binário do disco (buffer) na propriedade 'data' do item 0\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\n// Converte o conteúdo real do arquivo para texto Base64\nconst base64Text = buffer.toString('base64');\n\nreturn {\n  json: {\n    arquivoBase64: base64Text\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        352
+      ],
+      "id": "abd48de7-cd1a-4de9-ba8e-77cabf641a6f",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "command": "=powershell -NoProfile -Command \"$bytes=[Convert]::FromBase64String('{{ $json.arquivoBase64 }}'); [IO.File]::WriteAllBytes('\\ENDERECO-AQUI\\relatorio-pagos\\Notas_Faltantes_MA2.csv', $bytes)\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3104,
+        352
+      ],
+      "id": "f3ad1951-d4c1-4893-b09a-8bca696f82c6",
+      "name": "Execute Command"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "INICIAR CONFERENCIA": {
+      "main": [
+        [
+          {
+            "node": "LER RELATÓRIO PEPSICO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LER RELATÓRIO PEPSICO": {
+      "main": [
+        [
+          {
+            "node": "CONVERTER PARA JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "PEGAR NF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONVERTER PARA JSON": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PEGAR NF": {
+      "main": [
+        [
+          {
+            "node": "LIMPAR NF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LIMPAR NF": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "9b12bf84-ef84-40ad-8ca7-f1572d4ee011",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "430c8a584af68a5fa0d5cd8f68febaef16d1a9ef653c77beb0202656504c0ea1"
+  },
+  "nodeGroups": [],
+  "id": "GfaoRCP6V4eNYvPP",
+  "tags": []
+}

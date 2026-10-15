@@ -1,0 +1,694 @@
+{
+  "name": "ANALISE LUPEON (CONCLUÍDO)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        -48
+      ],
+      "id": "b954b6c4-835c-422a-a62d-23762d07f7b3",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "command": "powershell -NoProfile -Command \"[Convert]::ToBase64String([IO.File]::ReadAllBytes('\\ENDERECO-AQUI\\relatorios\\PainelMonitoramento_2026_10_09_08h40m.xlsx'))\" "
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "68a81318-7a98-4e6e-b21e-ec9b95b9db95",
+      "name": "LER B2C"
+    },
+    {
+      "parameters": {
+        "command": "powershell -NoProfile -Command \"[Convert]::ToBase64String([IO.File]::ReadAllBytes('\\ENDERECO-AQUI\\relatorios\\Cadastro Documento Transporte (1).xlsx'))\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        160,
+        176
+      ],
+      "id": "a6609267-edcb-4f0a-b495-1bf905c7b2e3",
+      "name": "LER LUPEON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base64 = $input.first().json.stdout;\n\nconst binaryData = await this.helpers.prepareBinaryData(\n  Buffer.from(base64, 'base64'),\n  'CadastroDocumentos.xlsx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'\n);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      data: binaryData\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        176
+      ],
+      "id": "2b78e1b0-cec0-4664-a7d8-4d4b0723da9c",
+      "name": "TRANSFORMAR EM EXCEL LUPEON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base64 = $input.first().json.stdout;\n\nconst binaryData = await this.helpers.prepareBinaryData(\n  Buffer.from(base64, 'base64'),\n  'ConsultaMonitoramento.xlsx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'\n);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      data: binaryData\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "15f275d3-e130-4f17-afe2-1e9ba68275de",
+      "name": "TRANSFORMAR EM EXCEL B2C"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        0
+      ],
+      "id": "f9c127a7-309c-48c0-907e-5b44d6ea8e02",
+      "name": "EXTRAIR DADOS B2C"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        608,
+        176
+      ],
+      "id": "ae05853f-757f-4139-95b7-a47df523d668",
+      "name": "EXTRAIR DADOS LUPEON"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\nconst mapa = new Map();\n\nfunction normalizarOC(valor) {\n  return String(valor ?? \"\")\n    .trim()\n    .replace(/\\.0+$/, \"\")\n    .replace(/\\D/g, \"\");\n}\n\nfor (const item of items) {\n  const dados = item.json;\n  const dt = String(dados[\"DT\"] ?? \"\").trim();\n\n  if (!dt) continue;\n\n  // O campo Ocorrências já deve conter apenas as OCs elegíveis,\n  // pois este node vem depois de FILTRAR OCs POR SOLUÇÃO.\n  const ocorrenciasTexto = String(dados[\"Ocorrências\"] ?? \"\");\n\n  const ocorrencias = (ocorrenciasTexto.match(/\\d+/g) || [])\n    .map(normalizarOC)\n    .filter(oc => oc && oc !== \"0\");\n\n  const tiposTexto = String(\n    dados[\"Tipos Elegiveis para subir\"] ?? \"\"\n  );\n\n  const tipos = tiposTexto\n    .split(\",\")\n    .map(tipo => tipo.trim())\n    .filter(Boolean);\n\n  // A NF vem da mesma linha do B2C que contém a solução elegível.\n  const nfRemessa = String(\n    dados[\"NF Remessa Elegivel\"] ?? \"\"\n  ).trim();\n\n  const cidade = String(dados[\"Cidade\"] ?? \"\").trim();\n  const ehCTE = cidade !== \"\" &&\n    cidade.normalize(\"NFD\")\n      .replace(/[\\u0300-\\u036f]/g, \"\")\n      .toUpperCase()\n      .trim() !== \"SAO PAULO\";\n\n  if (!mapa.has(dt)) {\n    mapa.set(dt, {\n      DT: dt,\n      OCs: [],\n      OCsDetalhadas: []\n    });\n  }\n\n  const registro = mapa.get(dt);\n\n  for (let i = 0; i < ocorrencias.length; i++) {\n    const oc = ocorrencias[i];\n    const tipo = tipos[i] ?? \"Tipo não informado\";\n\n    // Evita duplicar uma OC na consolidação.\n    const existente = registro.OCsDetalhadas.find(\n      entrada => entrada.OC === oc\n    );\n\n    if (!existente) {\n      registro.OCs.push(oc);\n\n      registro.OCsDetalhadas.push({\n        OC: oc,\n        Tipo: tipo,\n        NFRemessa: nfRemessa,\n        Cidade: cidade,\n        CTE: ehCTE\n      });\n    } else {\n      // Se já existe a OC, completa dados que eventualmente\n      // não tenham sido preenchidos na primeira ocorrência.\n      if (!existente.NFRemessa && nfRemessa) {\n        existente.NFRemessa = nfRemessa;\n      }\n\n      if (\n        existente.Tipo === \"Tipo não informado\" &&\n        tipo !== \"Tipo não informado\"\n      ) {\n        existente.Tipo = tipo;\n      }\n    }\n  }\n}\n\nreturn Array.from(mapa.values()).map(registro => ({\n  json: registro\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "22746f29-cf2f-4785-91ac-1a4eaaff1877",
+      "name": "CONSOLIDAR DADOS B2C"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const dados = item.json;\n\n  const dt = String(dados[\"Nº DT/CARGA\"] ?? \"\")\n    .trim()\n    .replace(/^0+/, \"\");\n\n  const oc = String(dados[\"Nº Ocorrência\"] ?? \"\")\n    .trim()\n    .replace(/^0+/, \"\");\n\n  const tipo = String(dados[\"Tipo Importação\"] ?? \"\")\n    .trim();\n\n  const status = String(dados[\"Status Processamento\"] ?? \"\")\n    .trim();\n\n  return {\n    json: {\n      DT: dt,\n      OC: oc,\n      Tipo: tipo,\n      Status: status,\n      NumeroCTe: dados[\"Número CTe\"] ?? \"\",\n      ChaveCTe: dados[\"Chave CTe\"] ?? \"\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        176
+      ],
+      "id": "341e7fe3-b8a4-4d43-8e68-abad798a9b1e",
+      "name": "CONSOLIDAR DADOS LUPEON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst mapa = new Map();\n\n// Normaliza identificadores numéricos para evitar diferenças\n// entre números, textos e valores vindos de planilhas.\nfunction normalizarNumero(valor) {\n  return String(valor ?? \"\")\n    .trim()\n    .replace(/\\.0+$/, \"\")\n    .replace(/\\D/g, \"\");\n}\n\nfor (const item of items) {\n  const dados = item.json;\n\n  const dt = normalizarNumero(dados.DT);\n\n  if (!dt) {\n    continue;\n  }\n\n  if (!mapa.has(dt)) {\n    mapa.set(dt, {\n      DT: dt,\n      Frete: false,\n      ExtraFretes: [],\n      Registros: []\n    });\n  }\n\n  const registro = mapa.get(dt);\n\n  const oc = normalizarNumero(dados.OC);\n  const tipo = String(dados.Tipo ?? \"\").trim();\n  const status = String(dados.Status ?? \"\").trim();\n\n  // Preserva os registros originais para consulta.\n  registro.Registros.push({\n    OC: oc,\n    Tipo: tipo,\n    Status: status\n  });\n\n  // FRETE\n  if (tipo === \"Frete\" && status === \"Importado\") {\n    registro.Frete = true;\n  }\n\n  // EXTRA FRETE\n  if (tipo === \"Extra Frete\") {\n\n    // OC vazia ou 0 não é uma ocorrência válida.\n    // Assim, vale-pedágio não entra na comparação.\n    if (!oc || oc === \"0\") {\n      continue;\n    }\n\n    const existente = registro.ExtraFretes.find(\n      extra => extra.OC === oc\n    );\n\n    if (!existente) {\n      registro.ExtraFretes.push({\n        OC: oc,\n        Status: status || \"Status não informado\",\n        Statuses: status ? [status] : []\n      });\n\n    } else {\n      // Preserva os status encontrados para a mesma OC.\n      if (\n        status &&\n        !existente.Statuses.includes(status)\n      ) {\n        existente.Statuses.push(status);\n      }\n\n      // Se houver Importado, ele será o status principal.\n      // Outros status continuam registrados para conferência.\n      if (status === \"Importado\") {\n        existente.Status = \"Importado\";\n\n      } else if (\n        existente.Status !== \"Importado\" &&\n        status\n      ) {\n        existente.Status = status;\n      }\n    }\n  }\n}\n\nreturn Array.from(mapa.values()).map(registro => ({\n  json: registro\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        176
+      ],
+      "id": "97f70017-e5ab-4781-becf-3e5c02e36de3",
+      "name": "AGRUPAR DADOS LUPEON"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "DT",
+              "field2": "DT"
+            }
+          ]
+        },
+        "joinMode": "enrichInput1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1344,
+        64
+      ],
+      "id": "c425e292-7b08-4da2-a0e9-6661f3db9d71",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\nfunction normalizarNumero(valor) {\n  return String(valor ?? \"\")\n    .trim()\n    .replace(/\\.0+$/, \"\")\n    .replace(/\\D/g, \"\");\n}\n\nfunction texto(valor) {\n  return String(valor ?? \"\").trim();\n}\n\nreturn items.flatMap(item => {\n  const dados = item.json;\n  const dt = normalizarNumero(dados.DT);\n\n  const ocsDetalhadas = Array.isArray(dados.OCsDetalhadas)\n    ? dados.OCsDetalhadas\n    : [];\n\n  const ocsB2C = Array.isArray(dados.OCs)\n    ? [...new Set(\n        dados.OCs\n          .map(normalizarNumero)\n          .filter(oc => oc && oc !== \"0\")\n      )]\n    : [];\n\n  // Relaciona cada OC ao seu tipo, NF de remessa e cidade.\n  const mapaDetalhesOC = new Map(\n    ocsDetalhadas.map(entrada => [\n      normalizarNumero(entrada.OC),\n      {\n        Tipo: texto(entrada.Tipo),\n        NFRemessa: texto(entrada.NFRemessa),\n        Cidade: texto(entrada.Cidade),\n        CTE: entrada.CTE === true\n      }\n    ])\n  );\n\n  const extraFretes = Array.isArray(dados.ExtraFretes)\n    ? dados.ExtraFretes\n        .map(extra => ({\n          OC: normalizarNumero(extra.OC),\n          Status: texto(extra.Status),\n          Statuses: Array.isArray(extra.Statuses)\n            ? extra.Statuses.map(texto).filter(Boolean)\n            : []\n        }))\n        .filter(extra => extra.OC && extra.OC !== \"0\")\n    : [];\n\n  const mapaLupeon = new Map();\n\n  for (const extra of extraFretes) {\n    if (!mapaLupeon.has(extra.OC)) {\n      mapaLupeon.set(extra.OC, []);\n    }\n\n    const statuses = extra.Statuses.length\n      ? extra.Statuses\n      : extra.Status\n        ? [extra.Status]\n        : [];\n\n    const lista = mapaLupeon.get(extra.OC);\n\n    for (const status of statuses) {\n      if (!lista.includes(status)) {\n        lista.push(status);\n      }\n    }\n  }\n\n  const freteLupeon = dados.Frete === true\n    ? \"Importado\"\n    : \"Não encontrado\";\n\n  const listaExtraFretes = extraFretes\n    .map(extra => {\n      const statuses = mapaLupeon.get(extra.OC) ?? [];\n\n      return `${extra.OC} (${\n        statuses.length\n          ? statuses.join(\", \")\n          : \"Status não informado\"\n      })`;\n    })\n    .join(\", \");\n\n  const resultados = [];\n\n  for (const oc of ocsB2C) {\n    const existeNoLupeon = mapaLupeon.has(oc);\n\n    const detalhesOC = mapaDetalhesOC.get(oc) ?? {\n      Tipo: \"Tipo não informado\",\n      NFRemessa: \"\",\n      Cidade: \"\",\n      CTE: false\n    };\n\n    const camposOC = {\n      Tipo: detalhesOC.Tipo || \"Tipo não informado\",\n      \"NfRemessa\": detalhesOC.NFRemessa,\n      Cidade: detalhesOC.Cidade,\n      CTE: detalhesOC.CTE\n    };\n\n    // Caso 1: OC não encontrada no Lupeon.\n    if (!existeNoLupeon) {\n      resultados.push({\n        json: {\n          DT: dt,\n          Situacao: \"VERIFICAR\",\n          TipoPendencia: \"OC do B2C não localizada no Lupeon\",\n          OC: oc,\n          ...camposOC,\n          Detalhes:\n            `A OC ${oc} consta no B2C para a DT ${dt}, ` +\n            \"mas não foi localizada nos extra fretes do Lupeon consultado.\",\n          \"OCs B2C\": ocsB2C.join(\", \"),\n          \"Frete Lupeon\": freteLupeon,\n          \"Extra Fretes Lupeon\": listaExtraFretes\n        }\n      });\n\n      continue;\n    }\n\n    // Caso 2: OC encontrada, mas com status que exige conferência.\n    const statuses = mapaLupeon.get(oc) ?? [];\n\n    const statusProblematicos = statuses.filter(\n      status => status !== \"Importado\"\n    );\n\n    if (\n      statusProblematicos.length > 0 ||\n      statuses.length === 0\n    ) {\n      const statusDescricao = statuses.length\n        ? statuses.join(\", \")\n        : \"Status não informado\";\n\n      resultados.push({\n        json: {\n          DT: dt,\n          Situacao: \"VERIFICAR\",\n          TipoPendencia: \"Status do Lupeon para conferência\",\n          OC: oc,\n          ...camposOC,\n          Detalhes:\n            `A OC ${oc} foi localizada no relatório do Lupeon, ` +\n            `mas apresenta o seguinte status: ${statusDescricao}. ` +\n            \"Conferir o registro; esta pendência não significa que a OC esteja ausente.\",\n          \"OCs B2C\": ocsB2C.join(\", \"),\n          \"Frete Lupeon\": freteLupeon,\n          \"Extra Fretes Lupeon\": listaExtraFretes\n        }\n      });\n    }\n  }\n\n  // Caso 3: nenhuma pendência encontrada para a DT.\n  if (resultados.length === 0) {\n    return [{\n      json: {\n        DT: dt,\n        Situacao: \"OK\",\n        TipoPendencia: \"\",\n        OC: \"\",\n        Tipo: \"\",\n        \"NfRemessa\": \"\",\n        Cidade: \"\",\n        CTE: false,\n        Detalhes: ocsB2C.length\n          ? \"Todas as OCs identificadas no B2C foram localizadas no Lupeon.\"\n          : \"Nenhuma OC válida identificada no B2C para comparar.\",\n        \"OCs B2C\": ocsB2C.join(\", \"),\n        \"Frete Lupeon\": freteLupeon,\n        \"Extra Fretes Lupeon\": listaExtraFretes\n      }\n    }];\n  }\n\n  return resultados;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        64
+      ],
+      "id": "75a1c2bd-881d-4c40-9d14-f773146ee69c",
+      "name": "CONCILIAR"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1a081212-40dc-47bf-b29d-8d199f932685",
+              "leftValue": "={{ $json.Situacao }}",
+              "rightValue": "VERIFICAR",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        64
+      ],
+      "id": "c3ecb670-565a-410d-9fbf-83cf1b4bb8fa",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\nreturn items\n  .filter(item => item.json.Situacao === \"VERIFICAR\")\n  .map(item => {\n    const dados = item.json;\n\n    const tipoPendencia = String(dados.TipoPendencia ?? \"\");\n\n    const resultadoLupeon =\n      tipoPendencia === \"OC do B2C não localizada no Lupeon\"\n        ? \"Não localizada\"\n        : \"Conferir status\";\n\n    const statusBuscaNF = String(dados.StatusBuscaNF ?? \"\");\n    const alertaNF = String(dados.AlertaNF ?? \"\");\n\n    let observacao =\n      tipoPendencia === \"OC do B2C não localizada no Lupeon\"\n        ? \"\"\n        : String(dados.Detalhes ?? \"\");\n\n    if (alertaNF) {\n      observacao = observacao\n        ? `${observacao} | ALERTA NF: ${alertaNF}`\n        : `ALERTA NF: ${alertaNF}`;\n    }\n\n    return {\n      json: {\n        \"DT\": dados.DT ?? \"\",\n        \"OC a conferir\": dados.OC ?? \"\",\n        \"Tipo\": dados.Tipo ?? \"Tipo não informado\",\n        \"Resultado da busca no Lupeon\": resultadoLupeon,\n        \"NF REMESSA\": dados.NfRemessa ?? \"\",\n        \"Status NF COLETAS\": statusBuscaNF,\n        \"OCs do B2C\": dados[\"OCs B2C\"] ?? \"\",\n        \"Observação\": observacao\n      }\n    };\n  });\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        80
+      ],
+      "id": "cb7c47a5-ffee-4e93-ae22-494f5cdfd6b1",
+      "name": "ORGANIZAR PENDENCIAS"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "Relatorio_Pendencias_DT.xlsx"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2608,
+        80
+      ],
+      "id": "5acc1bad-7f34-46b7-96dc-40ac7d678e45",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items\n  .filter(item => item.json.Situacao === \"OK\")\n  .map(item => {\n    const dados = item.json;\n    return {\n      json: {\n        \"DT\": dados.DT ?? \"\",\n        \"Situação\": dados.Situacao,\n        \"OCs do B2C\": dados[\"OCs B2C\"] ?? \"\",\n\n      }\n    };\n  });"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        432
+      ],
+      "id": "767938e3-b27b-4f48-9fc8-a7d215151078",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// ==================================================\n// 1. REGRAS DE NEGÓCIO\n// ==================================================\n\n// Soluções cujas OCs DEVEM ser lançadas no Lupeon.\nconst SOLUCOES_QUE_SOBEM = new Set([\n  \"RETORNO PARCIAL\",\n  \"PAGAMENTO AUTORIZADO\",\n  \"REENTREGA\",\n  \"DEVOLUCAO PARCIAL\",\n  \"RETORNO\",\n  \"MERCADORIA RECEBIDA - COM ESTADIA\"\n]);\n\n// Soluções cujas OCs NÃO devem ser lançadas no Lupeon.\nconst SOLUCOES_QUE_NAO_SOBEM = new Set([\n  \"MERCADORIA RECEBIDA\",\n  \"COLETA FORA DE FLUXO\",\n  \"DEVOLUCAO PARCIAL SEM CUSTO\",\n  \"PROCESSO DE ENTREGA\",\n  \"DEVOLUCAO PARCIAL FORA DE FLUXO\",\n  \"REENTREGA SEM CUSTO\",\n  \"COLETA\",\n  \"PAGAMENTO NAO AUTORIZADO\",\n  \"RETORNO SEM CUSTO\",\n  \"DEVOLUCAO INTERCOMPANY - TRIANGULO\"\n]);\n\n// ==================================================\n// 2. FUNÇÕES AUXILIARES\n// ==================================================\n\nfunction normalizarTexto(valor) {\n  return String(valor ?? \"\")\n    .normalize(\"NFD\")\n    .replace(/[\\u0300-\\u036f]/g, \"\")\n    .toUpperCase()\n    .replace(/\\s+/g, \" \")\n    .trim();\n}\n\nfunction normalizarNomeCampo(valor) {\n  return normalizarTexto(valor).replace(/[^A-Z0-9]/g, \"\");\n}\n\n// Busca os campos sem depender de maiúsculas,\n// minúsculas, acentos ou espaços no cabeçalho.\nfunction buscarCampo(dados, nomesPossiveis) {\n  const campos = Object.keys(dados);\n\n  for (const nome of nomesPossiveis) {\n    const procurado = normalizarNomeCampo(nome);\n\n    const encontrado = campos.find(\n      campo => normalizarNomeCampo(campo) === procurado\n    );\n\n    if (encontrado !== undefined) {\n      return dados[encontrado];\n    }\n  }\n\n  return undefined;\n}\n\n// Extrai os números das OCs e remove duplicadas.\nfunction extrairOCs(valor) {\n  const numeros = String(valor ?? \"\").match(/\\d+/g) || [];\n\n  return [\n    ...new Set(\n      numeros.filter(numero => numero !== \"0\")\n    )\n  ];\n}\n\n// ==================================================\n// 3. PROCESSAR CADA REGISTRO DO B2C\n// ==================================================\n\nreturn items.map((item, indice) => {\n  const dados = item.json;\n\n  const dt = String(\n    buscarCampo(dados, [\"DT\"]) ?? \"DT não identificada\"\n  ).trim();\n\n  const valorOCs = buscarCampo(dados, [\n    \"Ocorrências\",\n    \"Ocorrencias\"\n  ]);\n\nconst valorStatus = buscarCampo(dados, [\n  \"Status_Ocorrências\",\n  \"status_ocorrencia\"\n]);\n\n  // Se os campos não existirem, interrompe a execução\n  // para evitar uma conciliação incompleta.\nif (\n  valorOCs === undefined ||\n  String(valorOCs ?? \"\").trim() === \"\" ||\n  !String(valorOCs).match(/\\d+/)\n) {\n  // Esta DT não possui nenhuma OC válida para comparar.\n  return {\n    json: {\n      ...dados,\n      \"Ocorrências\": \"\",\n      \"OCs originais\": \"\",\n      \"OCs elegíveis para subir\": \"\",\n      \"OCs descartadas pela solução\": \"\"\n    }\n  };\n}\n\n  if (valorStatus === undefined) {\n    throw new Error(\n      `Item ${indice + 1}, DT ${dt}: campo \"status_ocorrencia\" não encontrado. ` +\n      \"Verifique se o node EXTRAIR DADOS B2C está trazendo a coluna BA.\"\n    );\n  }\n\n  const ocsOriginais = extrairOCs(valorOCs);\n  const textoStatus = String(valorStatus ?? \"\");\n\n  // ==================================================\n  // 4. ASSOCIAR CADA OC À SUA SOLUÇÃO\n  // ==================================================\n\n  const mapaSolucoes = new Map();\n\n  // Os registros podem estar separados por <br>, <br/>\n  // ou aparecer diretamente em sequência.\n  const blocos = textoStatus\n    .split(/<br\\s*\\/?>|(?=OC\\s*:\\s*\\d+)/i)\n    .map(bloco => bloco.trim())\n    .filter(Boolean);\n\n  for (const bloco of blocos) {\n    const matchOC = bloco.match(/\\bOC\\s*:\\s*(\\d+)/i);\n\n    if (!matchOC) {\n      continue;\n    }\n\n    const oc = matchOC[1];\n\n    if (!mapaSolucoes.has(oc)) {\n      mapaSolucoes.set(oc, {\n        solucoes: new Set(),\n        semSolucao: false\n      });\n    }\n\n    const registro = mapaSolucoes.get(oc);\n\n    // Extrai a solução até o campo \"Status NF\".\n    const matchSolucao = bloco.match(\n      /\\bSolu[cç][aã]o\\s*:\\s*([\\s\\S]*?)(?=\\s*-\\s*Status\\s*NF\\s*:|$)/i\n    );\n\n    if (!matchSolucao || !matchSolucao[1].trim()) {\n      registro.semSolucao = true;\n      continue;\n    }\n\n    const solucao = normalizarTexto(matchSolucao[1]);\n\n    registro.solucoes.add(solucao);\n  }\n\n  // ==================================================\n  // 5. VALIDAR SE TODAS AS OCs PODEM SER CLASSIFICADAS\n  // ==================================================\n\n  const ocsDaColuna = new Set(ocsOriginais);\n\n  // Detecta OCs existentes no status que não aparecem\n  // na lista original \"Ocorrências\".\n  const ocsForaDaLista = [\n    ...mapaSolucoes.keys()\n  ].filter(oc => !ocsDaColuna.has(oc));\n\n  if (ocsForaDaLista.length > 0) {\n    throw new Error(\n      `DT ${dt}: estas OCs aparecem em status_ocorrencia, ` +\n      `mas não na coluna \"Ocorrências\": ${ocsForaDaLista.join(\", \")}.`\n    );\n  }\n\n  const ocsElegiveis = [];\n  const ocsDescartadas = [];\n  const tipoElegivel = [];\n\n  for (const oc of ocsOriginais) {\n    const registro = mapaSolucoes.get(oc);\n\n    if (!registro) {\n      throw new Error(\n        `DT ${dt}: a OC ${oc} não possui registro correspondente ` +\n        \"em status_ocorrencia. Não é seguro classificá-la automaticamente.\"\n      );\n    }\n\n    if (\n      registro.semSolucao ||\n      registro.solucoes.size === 0\n    ) {\n      throw new Error(\n        `DT ${dt}: não foi possível identificar a solução da OC ${oc}.`\n      );\n    }\n\n    if (registro.solucoes.size > 1) {\n      throw new Error(\n        `DT ${dt}: a OC ${oc} apareceu com soluções diferentes: ` +\n        `${[...registro.solucoes].join(\" / \")}. Confira o B2C.`\n      );\n    }\n\n    const solucao = [...registro.solucoes][0];\n\n    // A OC deve continuar no fluxo.\n    if (SOLUCOES_QUE_SOBEM.has(solucao)) {\n      ocsElegiveis.push(oc);\n      tipoElegivel.push(solucao);\n      continue;\n    }\n\n    // A OC deve ser descartada da conciliação.\n    if (SOLUCOES_QUE_NAO_SOBEM.has(solucao)) {\n      ocsDescartadas.push(`${oc} (${solucao})`);\n      continue;\n    }\n\n    // Solução nova ou não mapeada: não ignorar silenciosamente.\n    throw new Error(\n      `DT ${dt}: solução não cadastrada para a OC ${oc}: ` +\n      `\"${solucao}\". Adicione-a às regras antes de continuar.`\n    );\n  }\n\n  // ==================================================\n  // 6. DEVOLVER OS DADOS FILTRADOS\n  // ==================================================\n\n  return {\n    json: {\n      ...dados,\n\n      // Este é o campo lido pelo node CONSOLIDAR DADOS B2C.\n      // Agora contém somente as OCs que devem subir.\n      \"Ocorrências\": ocsElegiveis.join(\" / \"),\n\n      // Campos auxiliares para conferência durante os testes.\n      \"OCs originais\": ocsOriginais.join(\", \"),\n      \"OCs elegíveis para subir\": ocsElegiveis.join(\", \"),\n      \"Tipos Elegiveis para subir\": tipoElegivel.join(\", \"),\n      \"OCs descartadas pela solução\": ocsDescartadas.join(\", \")\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        0
+      ],
+      "id": "2d6a102b-ddb8-4650-86af-0405da0237d1",
+      "name": "FILTRAR OCs POR SOLUÇÃO"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\nconst SOLUCOES_QUE_SOBEM = new Set([\n  \"RETORNO PARCIAL\",\n  \"PAGAMENTO AUTORIZADO\",\n  \"REENTREGA\",\n  \"DEVOLUCAO PARCIAL\",\n  \"RETORNO\"\n]);\n\nfunction normalizarTexto(valor) {\n  return String(valor ?? \"\")\n    .normalize(\"NFD\")\n    .replace(/[\\u0300-\\u036f]/g, \"\")\n    .toUpperCase()\n    .trim();\n}\n\nfunction extrairOCs(texto) {\n  return [...new Set(\n    (String(texto ?? \"\").match(/\\d+/g) || [])\n      .filter(oc => oc !== \"0\")\n  )];\n}\n\nreturn items.map(item => {\n  const dados = item.json;\n\n  const cidade = normalizarTexto(dados[\"Cidade\"]);\n  const nfRemessa = String(dados[\"NF Remessa\"] ?? \"\").trim();\n\n  const ocs = extrairOCs(dados[\"Ocorrências\"]);\n  const statusTexto = String(dados[\"Status_Ocorrências\"] ?? \"\");\n\n  const tiposElegiveis = [];\n  const ocsElegiveis = [];\n\n  // Identifica a solução de cada OC descrita no status.\n  const registros = statusTexto.match(\n    /OC:\\s*\\d+[\\s\\S]*?(?=OC:\\s*\\d+|$)/gi\n  ) || [];\n\n  for (const registro of registros) {\n    const ocMatch = registro.match(/OC:\\s*(\\d+)/i);\n    const solucaoMatch = registro.match(/Solução:\\s*([^-]*?)(?=\\s*-\\s*Status NF:|$)/i);\n\n    if (!ocMatch || !solucaoMatch) continue;\n\n    const oc = ocMatch[1];\n    const solucao = normalizarTexto(solucaoMatch[1]);\n\n    if (SOLUCOES_QUE_SOBEM.has(solucao)) {\n      ocsElegiveis.push(oc);\n      tiposElegiveis.push(solucao);\n    }\n  }\n\n  // Mantém somente as OCs elegíveis que também constam\n  // no campo Ocorrências desta linha do B2C.\n  const ocsElegiveisDaLinha = ocsElegiveis.filter(\n    oc => ocs.includes(oc)\n  );\n\n  return {\n    json: {\n      ...dados,\n      Cidade_Normalizada: cidade,\n      \"OCs elegíveis para subir\": ocsElegiveisDaLinha.join(\", \"),\n      \"Tipos Elegiveis para subir\": tiposElegiveis.join(\", \"),\n\n      // Nesta etapa, a NF é associada à OC elegível da própria linha.\n      \"NF Remessa Elegivel\": ocsElegiveisDaLinha.length > 0\n        ? nfRemessa\n        : \"\",\n\n      \"É CTE\": cidade !== \"\" && cidade !== \"SAO PAULO\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        0
+      ],
+      "id": "796d68fe-cf58-4ae7-a65d-e98aea753024",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "command": "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; $excel=$null; $wb=$null; try { $excel=New-Object -ComObject Excel.Application; $excel.Visible=$false; $excel.DisplayAlerts=$false; $wb=$excel.Workbooks.Open('\\ENDERECO-AQUI\\relatorios\\COLETAS- 2026.xlsx',0,$true); $result=[System.Collections.Generic.List[object]]::new(); for($i=1;$i -le $wb.Worksheets.Count;$i++){ $ws=$wb.Worksheets.Item($i); $last=$ws.UsedRange.Row+$ws.UsedRange.Rows.Count-1; for($r=1;$r -le $last;$r++){ $dt=[string]$ws.Cells.Item($r,6).Text; $dtValor=[string]$ws.Cells.Item($r,6).Value2; $cliente=[string]$ws.Cells.Item($r,9).Text; $nota=[string]$ws.Cells.Item($r,23).Text; if(-not [string]::IsNullOrWhiteSpace($dt) -or -not [string]::IsNullOrWhiteSpace($cliente) -or -not [string]::IsNullOrWhiteSpace($nota)){ $result.Add([PSCustomObject]@{Aba=$ws.Name; Linha=$r; DT=$dt.Trim(); DTValor=$dtValor.Trim(); Cliente=$cliente.Trim(); Nota=$nota.Trim()}) } }; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($ws) }; ConvertTo-Json -InputObject @($result) -Compress -Depth 3 } finally { if($wb){$wb.Close($false); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($wb)}; if($excel){$excel.Quit(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($excel)}; [GC]::Collect(); [GC]::WaitForPendingFinalizers() }\"\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -208
+      ],
+      "id": "f996bf2a-f92f-44e2-b6a5-4ff538e5b2f1",
+      "name": "LER COLETA"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json.stdout;\n\nif (!raw) {\n  throw new Error('O node LER COLETAS não retornou dados em stdout.');\n}\n\nlet rows;\n\ntry {\n  rows = JSON.parse(raw);\n} catch (error) {\n  throw new Error(\n    'Não foi possível interpretar o JSON de COLETAS. Verifique a saída do Execute Command.'\n  );\n}\n\nif (!Array.isArray(rows)) {\n  rows = [rows];\n}\n\nreturn rows\n  .filter(row => {\n    const dt = String(row.DT ?? '').trim();\n    const cliente = String(row.Cliente ?? '').trim();\n\n    // Ignora cabeçalhos, linhas vazias e separadores.\n    return /^\\d+$/.test(dt) && cliente !== '';\n  })\n  .map(row => ({\n    json: {\n      origem: 'COLETAS',\n      DT: String(row.DT).trim(),\n      Cliente: String(row.Cliente ?? '').trim(),\n      Nota: String(row.Nota ?? '').trim(),\n      Aba: String(row.Aba ?? '').trim(),\n      Linha: row.Linha\n    }\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -224
+      ],
+      "id": "a3855b4a-d90b-4cf8-b047-18c72df70f6a",
+      "name": "TRANSFORMAR EM EXCEL COLETA"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        -240
+      ],
+      "id": "73fd5d0d-500d-43c4-8af8-d0054626c5cf",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst itens = $input.all();\n\nreturn itens\n  .filter(item => {\n    const dados = item.json;\n\n    const cidade = String(dados.Cidade ?? '')\n      .trim()\n      .normalize('NFD')\n      .replace(/[\\u0300-\\u036f]/g, '')\n      .toUpperCase();\n\n    const dt = String(dados.DT ?? '').trim();\n\n    return cidade === 'SAO PAULO' && /^\\d+$/.test(dt);\n  })\n  .flatMap(item => {\n    const dados = item.json;\n    const dt = String(dados.DT).trim();\n\n    const ocorrencias = String(dados.Status_Ocorrências ?? '')\n      .split('\\n');\n\n    return ocorrencias\n      .map(linha => {\n        const ocMatch = linha.match(/OC:\\s*(\\d+)/i);\n        const tipoMatch = linha.match(/Solução:\\s*(.*?)\\s*-\\s*Status NF:/i);\n\n        if (!ocMatch || !tipoMatch) return null;\n\n        return {\n          json: {\n            ...dados,\n            origem: 'B2C',\n            DT: dt,\n            OC: ocMatch[1].trim(),\n            Tipo: tipoMatch[1].trim().toUpperCase()\n          }\n        };\n      })\n      .filter(item => item !== null);\n  });\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        -368
+      ],
+      "id": "29b77328-d32f-4394-b3c5-90cd45edac50",
+      "name": "SEPARAR B2C PARA BUSCA"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst itens = $input.all().map(item => item.json);\n\nconst b2c = itens.filter(item => item.origem === 'B2C');\nconst coletas = itens.filter(item => item.origem === 'COLETAS');\n\nconst porDT = new Map();\n\nfor (const linha of coletas) {\n  const dt = String(linha.DT ?? '').trim();\n\n  if (!dt) continue;\n\n  if (!porDT.has(dt)) {\n    porDT.set(dt, []);\n  }\n\n  porDT.get(dt).push(linha);\n}\n\nfunction extrairReferencias(nota) {\n  return String(nota ?? '')\n    .split('/')\n    .map(parte => parte.trim())\n    .filter(parte =>\n      /[A-Za-z]/.test(parte) &&\n      /[\\d?]/.test(parte)\n    );\n}\n\nfunction prefixoEsperado(tipo) {\n  const t = String(tipo ?? '').trim().toUpperCase();\n\n  if (t === 'PAGAMENTO AUTORIZADO') return 'D';\n  if (t === 'REENTREGA') return 'R';\n\n  return null;\n}\n\nreturn b2c.map(registro => {\n  const dt = String(registro.DT ?? '').trim();\n  const oc = String(registro.OC ?? '').trim();\n  const tipo = String(registro.Tipo ?? '').trim().toUpperCase();\n  const prefixo = prefixoEsperado(tipo);\n\n  const linhas = porDT.get(dt) ?? [];\n\n  const todasReferencias = [\n    ...new Set(\n      linhas.flatMap(linha => extrairReferencias(linha.Nota))\n    )\n  ];\n\n  const referenciasCompativeis = prefixo\n    ? todasReferencias.filter(ref =>\n        ref.toUpperCase().startsWith(prefixo)\n      )\n    : [];\n\n  let status;\n\n  if (linhas.length === 0) {\n    status = 'DT NÃO ENCONTRADA';\n  } else if (prefixo === null) {\n    status = 'TIPO SEM REGRA DE PREFIXO — CONFERIR';\n  } else if (referenciasCompativeis.some(ref => ref.includes('?'))) {\n    status = 'REVISAR — REFERÊNCIA INCOMPLETA';\n  } else if (referenciasCompativeis.length > 1) {\n    status = 'MÚLTIPLAS NOTAS — CONFERIR';\n  } else if (referenciasCompativeis.length === 1) {\n    status = 'NF ENCONTRADA';\n  } else if (todasReferencias.length > 0) {\n    status = 'SEM REFERÊNCIA COMPATÍVEL — COMUNICAR EQUIPE';\n  } else {\n    status = 'SEM NF ADICIONAL — COMUNICAR EQUIPE';\n  }\n\n  return {\n    json: {\n      ...registro,\n      DT: dt,\n      OC: oc,\n      Tipo: tipo,\n      PrefixoEsperado: prefixo ?? 'SEM REGRA',\n      NF_Referencias_Originais: todasReferencias,\n      NF_Candidatas: referenciasCompativeis,\n      Quantidade_NF: referenciasCompativeis.length,\n      Status_NF: status,\n      COLETAS_Encontradas: linhas.map(linha => ({\n        Aba: linha.Aba,\n        Linha: linha.Linha,\n        Nota: linha.Nota,\n        Cliente: linha.Cliente\n      }))\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        -240
+      ],
+      "id": "6470f04c-e610-4907-a9a3-c87e4010cb54",
+      "name": "BUSCAR NF POR DT"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "DT",
+              "field2": "DT"
+            },
+            {
+              "field1": "OC",
+              "field2": "OC"
+            }
+          ]
+        },
+        "joinMode": "enrichInput1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2032,
+        80
+      ],
+      "id": "3978f5fb-ae86-4221-9d0a-d75f053500f0",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const d = item.json;\n\n  const candidatas = Array.isArray(d.NF_Candidatas)\n    ? [...new Set(d.NF_Candidatas)]\n    : [];\n\n  const ehCTE = d.CTE === true;\n\n  const cidade = String(d.Cidade ?? '')\n    .trim()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toUpperCase();\n\n  const ehSaoPaulo = cidade === 'SAO PAULO';\n\n  const statusNF = String(d.Status_NF ?? '').trim();\n  const nfRemessaOriginal = String(d.NfRemessa ?? '').trim();\n\n  const nfEncontrada =\n    !ehCTE &&\n    statusNF === 'NF ENCONTRADA' &&\n    candidatas.length === 1 &&\n    !candidatas[0].includes('?')\n      ? candidatas[0]\n      : '';\n\n  let nfRemessa;\n  let statusBuscaNF;\n  let alertaNF;\n\n  if (ehCTE) {\n    nfRemessa = nfRemessaOriginal;\n\n    if (nfRemessaOriginal) {\n      statusBuscaNF = 'CTE — NF REMESSA PRESERVADA';\n      alertaNF = '';\n    } else {\n      statusBuscaNF = 'CTE — NF REMESSA AUSENTE NA ORIGEM';\n      alertaNF =\n        'CTE sem NF Remessa informada no B2C. Conferir manualmente na COLETAS e validar qual nota corresponde à ocorrência.';\n    }\n\n  } else if (ehSaoPaulo) {\n    nfRemessa = nfEncontrada;\n\n    if (nfEncontrada) {\n      statusBuscaNF = 'NF ENCONTRADA NA COLETAS';\n      alertaNF = '';\n\n    } else if (\n      statusNF === 'SEM REFERÊNCIA COMPATÍVEL — COMUNICAR EQUIPE'\n    ) {\n      statusBuscaNF = 'REFERÊNCIA INCOMPATÍVEL';\n      alertaNF =\n        'COLETAS possui referência, mas não com o prefixo esperado. Comunicar a equipe.';\n\n    } else if (\n      statusNF === 'SEM NF ADICIONAL — COMUNICAR EQUIPE' ||\n      statusNF === 'DT NÃO ENCONTRADA'\n    ) {\n      statusBuscaNF = 'NF NÃO ENCONTRADA NA COLETAS';\n      alertaNF =\n        'Não foi localizada referência de NF na COLETAS. Conferir com a equipe se a nota foi criada.';\n\n    } else if (\n      statusNF === 'REVISAR — REFERÊNCIA INCOMPLETA'\n    ) {\n      statusBuscaNF = 'REFERÊNCIA INCOMPLETA';\n      alertaNF =\n        'A referência encontrada está incompleta. Conferir com a equipe.';\n\n    } else if (\n      statusNF === 'MÚLTIPLAS NOTAS — CONFERIR'\n    ) {\n      statusBuscaNF = 'MÚLTIPLAS NOTAS';\n      alertaNF =\n        'Foram encontradas múltiplas referências. Conferir com a equipe.';\n\n    } else {\n      statusBuscaNF = 'CONFERIR — NF NÃO CONFIRMADA NA COLETAS';\n      alertaNF =\n        'Não foi possível confirmar uma NF compatível. Conferir com a equipe.';\n    }\n\n  } else {\n    nfRemessa = nfEncontrada || nfRemessaOriginal;\n\n    statusBuscaNF = nfEncontrada\n      ? 'NF CANDIDATA ENCONTRADA'\n      : candidatas.length > 1\n        ? 'MÚLTIPLAS NOTAS — CONFERIR'\n        : 'SEM NF ÚNICA — CONFERIR';\n\n    alertaNF = '';\n  }\n    return {\n    json: {\n      ...d,\n      NfRemessa: nfRemessa,\n      StatusBuscaNF: statusBuscaNF,\n      AlertaNF: alertaNF\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        80
+      ],
+      "id": "3e484ecb-ee0e-414d-b23c-eaedbc22cf83",
+      "name": "COMPLEMENTAR NF"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst itens = $input.all().map(item => item.json);\nconst grupos = new Map();\n\nfor (const item of itens) {\n  const dt = String(item.DT ?? '').trim();\n  const oc = String(item.OC ?? '').trim();\n  const tipo = String(item.Tipo ?? '').trim();\n\n  if (!dt || !oc) continue;\n\n  const chave = `${dt}::${oc}::${tipo}`;\n\n  if (!grupos.has(chave)) {\n    grupos.set(chave, {\n      DT: dt,\n      OC: oc,\n      Tipo: tipo,\n      PrefixoEsperado: item.PrefixoEsperado ?? 'SEM REGRA',\n      NF_Candidatas: [],\n      NF_Referencias_Originais: [],\n      COLETAS_Encontradas: [],\n      StatusOriginais: []\n    });\n  }\n\n  const grupo = grupos.get(chave);\n\n  grupo.NF_Candidatas.push(...(item.NF_Candidatas ?? []));\n  grupo.NF_Referencias_Originais.push(\n    ...(item.NF_Referencias_Originais ?? [])\n  );\n  grupo.COLETAS_Encontradas.push(\n    ...(item.COLETAS_Encontradas ?? [])\n  );\n\n  if (item.Status_NF) {\n    grupo.StatusOriginais.push(item.Status_NF);\n  }\n}\n\nreturn [...grupos.values()].map(grupo => {\n  const candidatas = [...new Set(grupo.NF_Candidatas)];\n  const originais = [...new Set(grupo.NF_Referencias_Originais)];\n\n  const incompleta = candidatas.some(nf => nf.includes('?'));\n\n  let status;\n\n  if (incompleta) {\n    status = 'REVISAR — REFERÊNCIA INCOMPLETA';\n  } else if (candidatas.length > 1) {\n    status = 'MÚLTIPLAS NOTAS — CONFERIR';\n  } else if (candidatas.length === 1) {\n    status = 'NF ENCONTRADA';\n  } else if (\n    grupo.StatusOriginais.includes(\n      'SEM REFERÊNCIA COMPATÍVEL — COMUNICAR EQUIPE'\n    )\n  ) {\n    status = 'SEM REFERÊNCIA COMPATÍVEL — COMUNICAR EQUIPE';\n  } else if (\n    grupo.StatusOriginais.includes(\n      'SEM NF ADICIONAL — COMUNICAR EQUIPE'\n    )\n  ) {\n    status = 'SEM NF ADICIONAL — COMUNICAR EQUIPE';\n  } else if (\n    grupo.StatusOriginais.includes('DT NÃO ENCONTRADA')\n  ) {\n    status = 'DT NÃO ENCONTRADA';\n  } else if (\n    grupo.StatusOriginais.includes(\n      'TIPO SEM REGRA DE PREFIXO — CONFERIR'\n    )\n  ) {\n    status = 'TIPO SEM REGRA DE PREFIXO — CONFERIR';\n  } else {\n    status = 'SEM NF ADICIONAL — CONFERIR';\n  }\n\n  return {\n    json: {\n      DT: grupo.DT,\n      OC: grupo.OC,\n      Tipo: grupo.Tipo,\n      PrefixoEsperado: grupo.PrefixoEsperado,\n      NF_Candidatas: candidatas,\n      NF_Referencias_Originais: originais,\n      Quantidade_NF: candidatas.length,\n      Status_NF: status,\n      COLETAS_Encontradas: grupo.COLETAS_Encontradas\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        -240
+      ],
+      "id": "1d6346bd-a485-4100-b440-946fb06198ca",
+      "name": "RESUMIR NF POR DT"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "LER COLETA",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "LER B2C",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "LER LUPEON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LER B2C": {
+      "main": [
+        [
+          {
+            "node": "TRANSFORMAR EM EXCEL B2C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LER LUPEON": {
+      "main": [
+        [
+          {
+            "node": "TRANSFORMAR EM EXCEL LUPEON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRANSFORMAR EM EXCEL LUPEON": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR DADOS LUPEON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRANSFORMAR EM EXCEL B2C": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR DADOS B2C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR DADOS B2C": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "SEPARAR B2C PARA BUSCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR DADOS LUPEON": {
+      "main": [
+        [
+          {
+            "node": "CONSOLIDAR DADOS LUPEON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONSOLIDAR DADOS LUPEON": {
+      "main": [
+        [
+          {
+            "node": "AGRUPAR DADOS LUPEON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AGRUPAR DADOS LUPEON": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "CONSOLIDAR DADOS B2C": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "CONCILIAR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONCILIAR": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ORGANIZAR PENDENCIAS": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        []
+      ]
+    },
+    "FILTRAR OCs POR SOLUÇÃO": {
+      "main": [
+        [
+          {
+            "node": "CONSOLIDAR DADOS B2C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "FILTRAR OCs POR SOLUÇÃO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LER COLETA": {
+      "main": [
+        [
+          {
+            "node": "TRANSFORMAR EM EXCEL COLETA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRANSFORMAR EM EXCEL COLETA": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "SEPARAR B2C PARA BUSCA": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "BUSCAR NF POR DT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUSCAR NF POR DT": {
+      "main": [
+        [
+          {
+            "node": "RESUMIR NF POR DT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "COMPLEMENTAR NF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "COMPLEMENTAR NF": {
+      "main": [
+        [
+          {
+            "node": "ORGANIZAR PENDENCIAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RESUMIR NF POR DT": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d8adbc65-d428-4fe5-a487-1ccceee04c39",
+  "meta": {
+    "instanceId": "430c8a584af68a5fa0d5cd8f68febaef16d1a9ef653c77beb0202656504c0ea1"
+  },
+  "nodeGroups": [],
+  "id": "PzPr7NBiQyHFv45I",
+  "tags": []
+}

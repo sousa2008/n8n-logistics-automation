@@ -1,0 +1,1435 @@
+{
+  "name": "AUTO CSV (CONCLUÍDO)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1120,
+        16
+      ],
+      "id": "6589a8cd-c0af-4e28-8374-ccf58e2454f4",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "command": "dir /b /a-d /o-d \"Z:\\*.pdf\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        16
+      ],
+      "id": "9e05fc2d-a307-4d72-9391-18544b1cabb2",
+      "name": "VERIFICAR PASTA"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\n// o $input é sintaxe do n8n e o first garante que será a primeira resposta dada\n\nconst stdout = item.json.stdout || ''; \n// Pega todo o stdout do últimno node ou gera vazio, para evitar bug\n\nconst arquivos = stdout\n  .split(/\\r?\\n/)   // Separa os itens pelo \\n e \\r  (se tiver) \n  .map(linha => linha.trim())  // tira os espaços de cada linha\n  .filter(Boolean);  // Remove valores \"false\", como linhas \"\"\n\n\n\n\n// Aceita somente PDFs cujo nome seja formado por números\nconst arquivosNF = arquivos.filter(arquivo =>\n  /^\\d+\\.pdf$/i.test(arquivo)  \n// o .test faz false ou true para ver se é válido perante o regex\n// Do começo (/^) ao fim da string ($), deve haver um ou mais  números (\\d+) seguidos exatamente de .pdf (\\.pdf). O \\i significa case-insensitive\n);\n\n\nif (arquivosNF.length === 0) {\n  return [];  // se não passar nenhum arquivo, retorna vazio\n}\n\n  // tranfoorma cada item em um objeto JSON \nreturn arquivosNF.map(arquivo => ({\n  json: {\n    arquivo,   \n    // pega a variavel arquivo \n    caminho: `Z:/${arquivo}`,\n    // pega o caminha (sempre Z: + nome do arquivo)\n    status: 'PDF com nome de NF encontrado'\n    // gera o status como string\n  }\n}));\n\n\n\n/* Pega a saída textual do comando dir, transforma as linhas em uma lista JavaScript, limpa e valida os nomes dos arquivos e converte cada PDF válido em um item independente do n8n.*/"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        16
+      ],
+      "id": "6a557477-d431-4639-b328-62f041aeca07",
+      "name": "ESCOLHER PDFS"
+    },
+    {
+      "parameters": {
+        "executeOnce": false,
+        "command": "=node -e \"const fs=require('fs'); const p='{{$json.caminho}}'; console.log(fs.readFileSync(p).toString('base64'))\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -544,
+        16
+      ],
+      "id": "2cbb444a-fe17-4336-a71b-9ffff051a2f7",
+      "name": "LER PDFS"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\n\nconst base64 = item.json.stdout;\n\nif (!base64) {\n  throw new Error(`O PDF ${item.json.arquivo} não retornou dados em Base64.`);\n}\n\nreturn {\n  json: {\n    arquivo: item.json.arquivo,\n    caminho: item.json.caminho,\n    status: 'PDF carregado'\n  },\n  binary: {\n    data: {\n      data: base64.trim(),\n      mimeType: 'application/pdf',\n      fileName: item.json.arquivo\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        16
+      ],
+      "id": "4b58af6a-82e0-4a1a-8d2a-6859cbefca0a",
+      "name": "CRIAR BINARY PDF"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -224,
+        16
+      ],
+      "id": "8f4cdbe8-a289-47ca-be88-fa03c3376e37",
+      "name": "EXTRAIR TEXTO PDF"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst resultados = [];\n\nfor (const item of items) {\n  const texto = item.json.text || '';\n  if (!texto) { continue; }\n\n  \nlet matchNF = texto.match(\n  /\\bNF\\s*[-:]?\\s*([\\d\\s,-]+?)\\s*(?:-?\\s*VALOR\\s+NF\\b|ZONA\\b)/i\n\n);\n\nif (!matchNF) {\n  continue\n}\n\nconst blocoNF = matchNF[1].trim();\n\nlet nfPepsico = blocoNF;\nlet nfPepsico2 = null;\n\nif (blocoNF.includes('-') || blocoNF.includes(',')) {\n  const partes = blocoNF.split(/[,-]/);\n\n  nfPepsico = partes[0].trim();\n  nfPepsico2 = partes[1].trim();\n}\n\n  // Busca o número da nota da MA2 (corrigido com \\b para não pegar a data/identificador)\n  const matchNfMa2 = texto.match(\n    /N[uú]mero\\s+da\\s+Nota[\\s\\S]{0,150}?\\b(\\d{5,})\\b/i\n  );\n  // (\\d{5,}) - Indica que aceita números com pelo menos 5 termos e guarda como a informação de matchNfMa2\n\n  resultados.push({\n    json: {\n      arquivo: item.json.arquivo,\n      caminho: item.json.caminho,\n      \"NF Remessa PepsiCo\": nfPepsico, \n      \"NF Remessa PepsiCo 2\": nfPepsico2, // Nova chave dinâmica\n      \"NF MA2\": matchNfMa2 ? matchNfMa2[1] : null, // Agora vai extrair \"00025069\" perfeitamente\n      status: 'dados extraídos'\n    }\n  });\n}\n\nreturn resultados;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        32
+      ],
+      "id": "b57ebe3b-4122-4b1e-8645-9bf3b583bced",
+      "name": "EXTRAIR DADOS PDF"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webmail.jetmailx.com.br/service/soap",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml",
+        "body": "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">   <soap:Body>     <AuthRequest xmlns=\"urn:zimbraAccount\">       <account by=\"name\">EMAIL-AQUI</account>       <password>SENHA-AQUI</password>     </AuthRequest>   </soap:Body> </soap:Envelope>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        656,
+        32
+      ],
+      "id": "d16a62c9-6985-4318-ad92-3f36ef5749da",
+      "name": "ZIMBRA LOGIN"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webmail.jetmailx.com.br/service/soap",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "=ZM_AUTH_TOKEN={{ $json[\"data\"].match(/<authToken>(.*?)<\\/authToken>/)[1] }}\n"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml",
+        "body": "=<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n  <soap:Body>\n    <SearchRequest xmlns=\"urn:zimbraMail\" types=\"message\">\n      <query>subject:\"{{ $('EXTRAIR DADOS PDF').item.json[\"NF Remessa PepsiCo\"].split(' ')[0].replace(/^0+/, '') }}\"</query>\n    </SearchRequest>\n  </soap:Body>\n</soap:Envelope>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        912,
+        32
+      ],
+      "id": "2c9fcc27-20a3-4479-a061-9090b6bb1fbe",
+      "name": "ZIMBRA BUSCAR NF"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        32
+      ],
+      "id": "9898c984-20a8-4db6-ba9c-15f42133be52",
+      "name": "XML PARA JSON"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5197c63e-23ec-4bcb-a1e2-0d5c6a512d1b",
+              "name": "CNPJ Embarcador",
+              "value": "CNPJ-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "9b865c1c-ae45-48ef-8d7c-2c94e0c480b2",
+              "name": "CNPJ Transportadora",
+              "value": "CNPJ-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "6fb2f40c-9bf2-4b82-86dd-d6e7c399c08e",
+              "name": "Numero Nfe",
+              "value": "={{ $json.nfeProc.NFe.infNFe.ide.nNF }}",
+              "type": "string"
+            },
+            {
+              "id": "787bfc66-0ee7-4d5e-912c-5e94c1b9cc54",
+              "name": "Razao Destinatário",
+              "value": "={{ $json.nfeProc.NFe.infNFe.dest.xNome }}",
+              "type": "string"
+            },
+            {
+              "id": "1a1f1439-b764-4aa1-ba92-ca6c61cb3733",
+              "name": "CNPJ Destinatário",
+              "value": "={{ $json.nfeProc.NFe.infNFe.dest.CNPJ }}",
+              "type": "string"
+            },
+            {
+              "id": "c007bd88-c6f2-4d00-b9fe-f158f95da986",
+              "name": "CEP Origem",
+              "value": "={{ $json.nfeProc.NFe.infNFe.emit.enderEmit.CEP }}",
+              "type": "string"
+            },
+            {
+              "id": "a6a5ca91-77e6-4917-97bc-0cccbda7e626",
+              "name": "Cidade Origem",
+              "value": "Sao Paulo",
+              "type": "string"
+            },
+            {
+              "id": "5b2e500e-40ff-446f-9f28-0e6e37293c29",
+              "name": "Estado Origem",
+              "value": "SP",
+              "type": "string"
+            },
+            {
+              "id": "0c27b9ba-a76c-4326-af97-2b6f6717cfe7",
+              "name": "Cidade Destino",
+              "value": "Sao Paulo",
+              "type": "string"
+            },
+            {
+              "id": "3b6101c1-800b-464d-a95d-e4fb2ef9a211",
+              "name": "Estado Destino",
+              "value": "SP",
+              "type": "string"
+            },
+            {
+              "id": "39dbd38e-ed1e-4da2-8627-12bf6d6fc948",
+              "name": "Peso",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "96956329-c8df-499d-afe7-1f872820759d",
+              "name": "Valor Total Nfe",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "fbb0f688-f2f5-4ba4-b21d-9bfeb8b290ec",
+              "name": "Observações",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "e9fd4b79-1006-465c-8ea3-a3259070a046",
+              "name": "Valor Tarifa",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "96cbb911-dd47-4207-9124-e06990ee2d22",
+              "name": "Chave Nfe",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "c776d5ec-3794-483a-bac6-9937a5b0a358",
+              "name": "CEP Destino",
+              "value": "={{ $json.nfeProc.NFe.infNFe.dest.enderDest.CEP }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": "={{ false }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2256,
+        32
+      ],
+      "id": "bc23712e-c765-4688-90c2-a9840cac3c61",
+      "name": "AJUSTAR CAMPOS"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2320,
+        176
+      ],
+      "id": "c57d373a-fa59-4d29-a49c-a5fdf694e2ea",
+      "name": "JUNTAR DADOS"
+    },
+    {
+      "parameters": {
+        "options": {
+          "delimiter": ";",
+          "fileName": "={{ $json['Número Documento RPS'] }}.csv\n",
+          "headerRow": true
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        3280,
+        208
+      ],
+      "id": "0a19156e-a307-46dd-adfb-ff392797778d",
+      "name": "GERAR CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst resultados = [];\n\nfor (const [index, item] of items.entries()) {\n  const data = item.json.data || '';\n\n  // Recupera os dados originais do PDF\n  const dadosOriginais = $('EXTRAIR DADOS PDF').all()[index];\n\n  const nfPepsico =\n    dadosOriginais?.json?.[\"NF Remessa PepsiCo\"] || null;\n\n  if (!data) {\n    continue;\n  }\n\n  // Procura o primeiro id=\"...\" dentro da resposta\n  const match = data.match(/<m\\b[^>]*\\bid=\"([^\"]+)\"/);\n  // O regex busca uma tag <m com a fronteira \\b e com um [^>], que diz que deve\n  // ignorar \">\" (indicando que a tag <m não deve fechar antes do permitido).\n  // Após isso pode ter espaços (*) e encontra a palavra \"id=\", ignorando aspas [^\"]\n  // e permitindo espaços (+)\n\n  if (!match) {\n    console.log('========== EMAIL NÃO ENCONTRADO ==========');\n    console.log('NF pesquisada:', nfPepsico);\n    console.log('===========================================');\n    continue;\n  }\n\n  const messageId = match[1];\n\n  resultados.push({\n    json: {\n      ...item.json,\n      nfPepsico,\n      messageId\n    }\n  });\n}\n\nreturn resultados;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        32
+      ],
+      "id": "844a1372-487f-4fb2-a2a8-f0f5fe232eb5",
+      "name": "PEGAR ID DO EMAIL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst resultados = [];\n\nfor (const item of items) {\n  const data = item.json.data || '';\n\n  if (!data) {\n    continue;\n  }\n\n  // Procura a parte MIME que contém o XML\n  const match = data.match(\n    /<mp\\b[^>]*ct=\"application\\/xml\"[^>]*filename=\"([^\"]+)\"[^>]*part=\"([^\"]+)\"/i\n  );\n\n  if (!match) {\n    continue;\n  }\n\n  const xmlFilename = match[1]; \n  // Pegamos o nome do XML arqivado\n  const xmlPart = match[2]; \n  // Pegamos a parte que o XML se encontra no email\n\n  resultados.push({\n    json: {\n      messageId: item.json.messageId,\n      xmlPart,\n      xmlFilename\n    }\n  });\n}\n\nreturn resultados;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        32
+      ],
+      "id": "cc341bf4-145c-4765-b00b-aa804a1c85f0",
+      "name": "LOCALIZAR XML"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webmail.jetmailx.com.br/service/soap",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cookie",
+              "value": "=ZM_AUTH_TOKEN={{ $(\"ZIMBRA LOGIN\").first().json[\"data\"].match(/<authToken>(.*?)<\\/authToken>/)[1] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/xml",
+        "body": "=<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">   <soap:Body>     <GetMsgRequest xmlns=\"urn:zimbraMail\">       <m id=\"{{ $('PEGAR ID DO EMAIL').item.json.messageId }}\"/>     </GetMsgRequest>   </soap:Body> </soap:Envelope>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1312,
+        32
+      ],
+      "id": "5b533663-aceb-450a-b1fd-d573a1b2227e",
+      "name": "ZIMBRA PEGAR EMAIL"
+    },
+    {
+      "parameters": {
+        "url": "https://webmail.jetmailx.com.br/service/home/EMAIL-AQUI/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $(\"PEGAR ID DO EMAIL\").all()[$itemIndex].json.messageId }}"
+            },
+            {
+              "name": "part",
+              "value": "={{ $('LOCALIZAR XML').item.json.xmlPart }}"
+            },
+            {
+              "name": "auth",
+              "value": "qp"
+            },
+            {
+              "name": "zauthtoken",
+              "value": "={{ $(\"ZIMBRA LOGIN\").first().json[\"data\"].match(/<authToken>(.*?)<\\/authToken>/)[1] }}"
+            },
+            {
+              "name": "disp",
+              "value": "a"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1728,
+        32
+      ],
+      "id": "13e0f2b8-e07f-4534-9fb8-641527769c2a",
+      "name": "PEGAR XML1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst validos = [];\n\nfor (const item of items) {\n  const texto = item.json.text || '';\n\n  if (!texto) {\n    console.log('PDF SEM TEXTO');\n    continue;\n  }\n\n  const temPrefeitura =\n    /PREFEITURA DO MUNIC[IÍ]PIO DE S[AÃ]O PAULO/i.test(texto);\n\n  const temNumeroNota =\n    /N[uú]mero\\s+da\\s+Nota/i.test(texto);\n\n  const temDiscriminacao =\n    /DISCRIMINA[CÇ][AÃ]O\\s+DE\\s+SERVI[CÇ]OS/i.test(texto);\n\nconst temNF =\n  /\\bNF\\s*[-:]?\\s*\\d+/i.test(texto);\n\n  const ehNfse =\n    temPrefeitura &&\n    temNumeroNota &&\n    temDiscriminacao &&\n    temNF;\n\n  if (!ehNfse) {\n    console.log('========== PDF DESCARTADO ==========');\n    console.log('Tem Prefeitura:', temPrefeitura);\n    console.log('Tem Número da Nota:', temNumeroNota);\n    console.log('Tem Discriminação:', temDiscriminacao);\n    console.log('Tem NF:', temNF);\n    console.log(\n      'Trechos com NF:',\n      texto.match(/.{0,80}\\bNF\\b.{0,120}/gi)\n    );\n    console.log('====================================');\n\n    continue;\n  }\n\n  validos.push({\n    json: {\n      ...item.json,\n      status: 'NFS-e válida'\n    },\n    binary: item.binary\n  });\n}\n\nreturn validos;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        32
+      ],
+      "id": "9263a0c6-0809-42b2-b377-3e268a467049",
+      "name": "VALIDAR NFS-E"
+    },
+    {
+      "parameters": {
+        "operation": "xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        32
+      ],
+      "id": "19b93685-f3df-4168-9f65-77a79195e00a",
+      "name": "EXTRAIR XML"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3056,
+        192
+      ],
+      "id": "36840105-518c-4d08-b6c9-8de31ce97941",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: item.json\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        192
+      ],
+      "id": "26277b50-19cd-4593-bfe4-a57fc16dc9bc",
+      "name": "MAPEAR CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const dados = item.json;\n\n  return {\n    json: {\n      \"CNPJ Embarcador\": String(\n        dados[\"CNPJ Embarcador\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"CNPJ Transportadora\": String(\n        dados[\"CNPJ Transportadora\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"CNPJ Destinatário\": String(\n        dados[\"CNPJ Destinatário\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"Razao Destinatário\": dados[\"Razao Destinatário\"] ?? \"\",\n\n      \"Número Documento RPS\": String(\n        dados[\"Número Documento RPS\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"Data Emissao\": dados[\"Data Emissão\"] ?? \"\",\n\n      \"Cidade Origem\": dados[\"Cidade Origem\"] ?? \"\",\n\n      \"Estado Origem\": dados[\"Estado Origem\"] ?? \"\",\n\n      \"CEP Origem\": String(\n        dados[\"CEP Origem\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"Cidade Destino\": dados[\"Cidade Destino\"] ?? \"\",\n\n      \"Estado Destino\": dados[\"Estado Destino\"] ?? \"\",\n\n      \"CEP Destino\": String(\n        dados[\"CEP Destino\"] ?? \"\"\n      ).replace(/^0+/, \"\"),\n\n      \"Peso\": dados[\"Peso\"] ?? \"\",\n\n      \"Valor Total Nfe\": dados[\"Valor Total Nfe\"] ?? \"\",\n\n      \"Valor Total Frete\": dados[\"Valor Total Frete\"] ?? \"\",\n\n      \"Observações\": dados[\"Observações\"] ?? \"\",\n\n      \"Nome Tarifa\": dados[\"Nome Tarifa\"] ?? \"\",\n\n      \"Valor Tarifa\": dados[\"Valor Tarifa\"] ?? \"\",\n\n      \"Chave Nfe\": dados[\"Chave Nfe\"] ?? \"\",\n\n      \"Numero Nfe\": dados[\"Numero Nfe\"] ?? \"\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        176
+      ],
+      "id": "88f12f29-5d70-4542-a97b-840cbd0c2577",
+      "name": "ORGANIZAR CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\n\n// Verifica se o CSV existe\nif (!item.binary?.data) {\n  throw new Error('O CSV não possui o arquivo binário \"data\".');\n}\n\n// Recupera o conteúdo real do CSV\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\nif (!buffer || buffer.length === 0) {\n  throw new Error('O CSV está vazio.');\n}\n\n// O GERAR CSV já criou o arquivo com o RPS no nome.\n// Ex.: 25160.csv → RPS 25160\nconst nomeArquivoCSV = item.binary.data.fileName;\n\nif (!nomeArquivoCSV) {\n  throw new Error('O CSV não possui nome de arquivo.');\n}\n\nconst numeroRps = nomeArquivoCSV\n  .trim()\n  .replace(/\\.csv$/i, '');\n\nif (!/^\\d+$/.test(numeroRps)) {\n  throw new Error(\n    `Nome de arquivo inesperado: \"${nomeArquivoCSV}\". RPS extraído: \"${numeroRps}\".`\n  );\n}\n\nif (!numeroRps) {\n  throw new Error(\n    'Não foi possível obter o Número Documento RPS pelo nome do CSV.'\n  );\n}\n\n// Remove zeros à esquerda para localizar o PDF físico\nconst numeroPdf = String(numeroRps).replace(/^0+/, '');\n\nif (!numeroPdf) {\n  throw new Error(\n    `O RPS \"${numeroRps}\" não possui um número válido para localizar o PDF.`\n  );\n}\n\nconst nomePdf = `${numeroPdf}.pdf`;\n\nreturn {\n  json: {\n    ...item.json,\n\n    numeroRps: numeroRps,\n\n    nomeArquivoCSV: `${numeroRps}.csv`,\n\n    base64CSV: buffer.toString('base64'),\n\n    caminhoCSV:\n      `\\\\CAMINHO-SERVIDO-AQUI\\\\${numeroRps}.csv`,\n\n    caminhoPDF:\n      `Z:\\\\${nomePdf}`\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3504,
+        208
+      ],
+      "id": "b778935c-d1e9-4501-8077-f61185f7e218",
+      "name": "PREPARAR ARQUIVO"
+    },
+    {
+      "parameters": {
+        "command": "=powershell -NoProfile -Command \"$rps='{{ $json.stdout.trim().replace(/\\.csv$/i, '') }}'; if ([string]::IsNullOrWhiteSpace($rps)) { throw 'RPS não recebido do node SALVAR CSV.' }; $numero=$rps.TrimStart('0'); if ([string]::IsNullOrWhiteSpace($numero)) { throw 'Número RPS inválido: ' + $rps }; $arquivo='Z:\\' + $numero + '.pdf'; $destino='\\ENDEREÇO-AQUI\\' + $numero + '.pdf'; Write-Output ('RPS recebido: ' + $rps); Write-Output ('PDF de origem: ' + $arquivo); Write-Output ('Destino: ' + $destino); if (!(Test-Path -LiteralPath $arquivo)) { throw 'PDF de origem não encontrado: ' + $arquivo }; Move-Item -LiteralPath $arquivo -Destination $destino -Force; if (!(Test-Path -LiteralPath $destino)) { throw 'O PDF não foi encontrado no destino após a movimentação: ' + $destino }; Write-Output ('PDF movido com sucesso: ' + $destino)\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        4032,
+        208
+      ],
+      "id": "b0b14f9b-7e20-43e9-93cc-2a55220ccd39",
+      "name": "MOVER PDF"
+    },
+    {
+      "parameters": {
+        "command": "=powershell -NoProfile -Command \"$bytes=[Convert]::FromBase64String('{{ $json.base64CSV }}'); [IO.File]::WriteAllBytes('{{ $json.caminhoCSV }}',$bytes); Write-Output {{ $json.numeroRps }}.csv\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3696,
+        208
+      ],
+      "id": "3129e552-962c-4f5d-8608-49a02f08f425",
+      "name": "SALVAR CSCV"
+    },
+    {
+      "parameters": {
+        "content": "## VERIFICAR PASTA: \ndir (lista os diretórios)\n│\n├── /b\n│   └── formato simples (apenas nome e extensão dos arquivos)\n│\n├── /a-d\n│   └── excluir diretórios/pastas\n│\n├── /o-d\n│   └── ordenar por data, mais recente primeiro\n│\n└── \"Z:\\*.pdf\"\n    └── PDFs diretamente na unidade Z:",
+        "height": 656,
+        "width": 150,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        -656
+      ],
+      "id": "8b575483-95e7-4997-8b83-dca5b2724ce3",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## ESCOLHER PDFS\nstdout\n│\n│ \"25065.pdf\\n25064.pdf\\n25063.pdf\"\n▼\n.split(/\\r?\\n/)\n│\n│ [\"25065.pdf\", \"25064.pdf\", \"25063.pdf\"]\n▼\n.map(linha => linha.trim())\n│\n│ limpa espaços\n▼\n.filter(Boolean)\n│\n│ remove linhas vazias\n▼\n.filter(arquivo => regex.test(arquivo))\n│\n│ mantém apenas nomes numéricos + .pdf\n▼\narquivosNF\n│\n│ [\"25065.pdf\", \"25064.pdf\", \"25063.pdf\"]\n▼\n.map(arquivo => ({ json: {...} }))\n│\n▼\n3 itens do n8n",
+        "height": 960,
+        "width": 214
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -784,
+        144
+      ],
+      "id": "5ed58497-cd1a-42a6-a982-a9702c8310c2",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## LER PDF'S\n- node -e: Executa código JavaScript diretamente através do Node.js, sem precisar criar um arquivo .js\n\n- \"const fs=require('fs'); : Chama o módulo de arquivo do node.js (similar aos ponteiros com fopen visto em C)\n\n- const p='{{$json.caminho}}'; : Caminho do arquivo vindo do último node (em sintaxe n8n)\n\n- console.log(fs.readFileSync(p).toString('base64'))\": Imprime (console.log) o resultado lido do arquivo (com o readfilesync), tranformado em base64 (para tranformar bufffer em texto\n",
+        "height": 672,
+        "width": 182,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        -672
+      ],
+      "id": "fbb4572c-88f9-4769-810d-5de1c63be196",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## CRIAR BINARY PDF\n\nconst item = $input.item;\nPega o conteúdo do último node (em sintaxe do n8n)\n\nconst base64 = item.json.stdout;\nJoga o stdout em base 64 em uma variavel\n\nif (!base64) {\n  throw new Error(...);\n}\n\nVerificador de erro\n\nreturn {\n  json: {\n    arquivo: item.json.arquivo,\n    caminho: item.json.caminho,\n    status: 'PDF carregado'\n  },\n\nMantém no JSON informações sobre o arquivo, como nome, caminho e status.\n\n  binary: {\n    data: {\n      data: base64.trim(),\n      mimeType: 'application/pdf',\n      fileName: item.json.arquivo\n    }\n  }\n};\n\nCria um campo binário chamado `data` para que o n8n trate o conteúdo como um arquivo.\n\n`base64.trim()` coloca o conteúdo Base64 no campo e remove espaços/quebras de linha nas extremidades.\n\n`mimeType: 'application/pdf'` informa ao n8n que o conteúdo representa um arquivo PDF. Não converte o Base64 em PDF; apenas identifica o tipo do arquivo.\n\n`fileName` informa o nome do arquivo, recuperado do item anterior.",
+        "height": 2240,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        144
+      ],
+      "id": "afd1a102-ccc6-4dfc-aed9-414ce0d392e2",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## EXTRAIR DADOS PDF\nTransforma o base64 em texto padrão de PDF, usando como base o 'data' fornecido",
+        "height": 240,
+        "width": 150,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        -272
+      ],
+      "id": "791e70b0-ff16-4a34-a461-f96aa6c47d02",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## REGEX\n\n\\b\ncomeço/fronteira de uma palavra\n\nNF\nencontre \"NF\"\n\n\\s*\nzero ou mais espaços\n\n:\ndois pontos\n\n\\s*\nzero ou mais espaços\n\n\\d+\num ou mais números\n\n/i\nnão diferenciar maiúsculas de minúsculas",
+        "height": 496,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        208,
+        -544
+      ],
+      "id": "3b873caa-a6d0-4c53-b660-b042e00b49c7",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5197c63e-23ec-4bcb-a1e2-0d5c6a512d1b",
+              "name": "CNPJ Embarcador",
+              "value": "CNPJ-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "9b865c1c-ae45-48ef-8d7c-2c94e0c480b2",
+              "name": "CNPJ Transportadora",
+              "value": "CNPJ-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "6fb2f40c-9bf2-4b82-86dd-d6e7c399c08e",
+              "name": "Numero Nfe",
+              "value": "=1",
+              "type": "string"
+            },
+            {
+              "id": "787bfc66-0ee7-4d5e-912c-5e94c1b9cc54",
+              "name": "Razao Destinatário",
+              "value": "RAZAO-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "1a1f1439-b764-4aa1-ba92-ca6c61cb3733",
+              "name": "CNPJ Destinatário",
+              "value": "=CNPJ-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "c007bd88-c6f2-4d00-b9fe-f158f95da986",
+              "name": "CEP Origem",
+              "value": "CEP-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "a6a5ca91-77e6-4917-97bc-0cccbda7e626",
+              "name": "Cidade Origem",
+              "value": "Sao Paulo",
+              "type": "string"
+            },
+            {
+              "id": "5b2e500e-40ff-446f-9f28-0e6e37293c29",
+              "name": "Estado Origem",
+              "value": "SP",
+              "type": "string"
+            },
+            {
+              "id": "0c27b9ba-a76c-4326-af97-2b6f6717cfe7",
+              "name": "Cidade Destino",
+              "value": "Sao Paulo",
+              "type": "string"
+            },
+            {
+              "id": "3b6101c1-800b-464d-a95d-e4fb2ef9a211",
+              "name": "Estado Destino",
+              "value": "SP",
+              "type": "string"
+            },
+            {
+              "id": "39dbd38e-ed1e-4da2-8627-12bf6d6fc948",
+              "name": "Peso",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "96956329-c8df-499d-afe7-1f872820759d",
+              "name": "Valor Total Nfe",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "fbb0f688-f2f5-4ba4-b21d-9bfeb8b290ec",
+              "name": "Observações",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "e9fd4b79-1006-465c-8ea3-a3259070a046",
+              "name": "Valor Tarifa",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "96cbb911-dd47-4207-9124-e06990ee2d22",
+              "name": "Chave Nfe",
+              "value": "1",
+              "type": "string"
+            },
+            {
+              "id": "c776d5ec-3794-483a-bac6-9937a5b0a358",
+              "name": "CEP Destino",
+              "value": "CEP-AQUI",
+              "type": "string"
+            },
+            {
+              "id": "842c73ce-dba9-4eed-a8b9-af9de41745a8",
+              "name": "Número Documento RPS",
+              "value": "={{ $json['Número Documento RPS'] }}",
+              "type": "string"
+            },
+            {
+              "id": "448627f8-28b5-4d8b-8d7f-2ef84e7e9c99",
+              "name": "Data Emissão",
+              "value": "={{ $json['Data Emissão'] }}",
+              "type": "string"
+            },
+            {
+              "id": "97c18489-821f-443a-a360-25a654e37475",
+              "name": "Nome Tarifa",
+              "value": "={{ $json['Nome Tarifa'] }}",
+              "type": "string"
+            },
+            {
+              "id": "7bd2553a-3972-4b69-acd6-18a47e7689c3",
+              "name": "Valor Total Frete",
+              "value": "={{ $json['Valor Total Frete'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": "={{ false }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2256,
+        -128
+      ],
+      "id": "e09acb36-72ab-4801-abeb-5b65287d4f4c",
+      "name": "AJUSTAR CAMPOS DESLOCAMENTO"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst resultados = [];\n\nfor (const item of items) {\n  const texto = item.json.text || '';\n\n  if (!texto) {\n    continue;\n  }\n\n\n\n  // 2. NÚMERO DOCUMENTO RPS / NOTA MA2\n  const matchNfMa2 = texto.match(\n    /N[uú]mero\\s+da\\s+Nota[\\s\\S]*?(\\d{5,})\\s+\\d{2}\\/\\d{2}\\/\\d{4}/i\n  );\n\n  if (!matchNfMa2) {\n    throw new Error(\n      `Não foi possível encontrar o Número Documento RPS / Nota MA2 no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const nfMa2 = matchNfMa2[1];\n\n  // 3. DATA DE EMISSÃO\n  const matchDataEmissao = texto.match(\n    /\\d{5,}\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+\\d{2}:\\d{2}:\\d{2}/\n  );\n\n  if (!matchDataEmissao) {\n    throw new Error(\n      `Não foi possível encontrar a Data de Emissão no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const dataEmissao = matchDataEmissao[1];\n\n  // 4. VALOR TOTAL DO FRETE / SERVIÇO\n  const matchValorFrete = texto.match(\n    /VALOR\\s+TOTAL\\s+DO\\s+SERVI[CÇ]O\\s*=\\s*R\\$\\s*([\\d.]+,\\d{2})/i\n  );\n\n  if (!matchValorFrete) {\n    throw new Error(\n      `Não foi possível encontrar o Valor Total do Serviço no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const valorTotalFrete = matchValorFrete[1].replace(/\\./g, '');\n\n  // 5. NOME DA TARIFA\n  // Procura \"EVENTO\" e captura somente a palavra imediatamente seguinte.\n  const matchNomeTarifa = texto.match(\n    /\\bEVENTO\\s+(\\S+)/i\n  );\n\n  const nomeTarifa = matchNomeTarifa\n    ? matchNomeTarifa[1].toUpperCase()\n    : null;\n\n  resultados.push({\n    json: {\n      arquivo: item.json.arquivo,\n      caminho: item.json.caminho,\n      \"Número Documento RPS\": nfMa2,\n      \"Data Emissão\": dataEmissao,\n      \"Valor Total Frete\": valorTotalFrete,\n      \"Nome Tarifa\": \"DESLOCAMENTO VAZIO\",\n      status: 'dados extraídos'\n    }\n  });\n}\n\nreturn resultados;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -128
+      ],
+      "id": "ffe28126-2b4e-4a9b-b7ca-b4dd9dd36588",
+      "name": "EXTRAIR DADOS DESLOCAMENTO VAZIO"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst resultados = [];\n\nfor (const item of items) {\n  const texto = item.json.text || '';\n\n  if (!texto) {\n    continue;\n  }\n\n\n\n\nlet matchNF = texto.match(\n  /\\bNF\\s*[-:]?\\s*(\\d+)/\n);\n\nif (!matchNF) {\n  throw new Error(\n    `O PDF ${item.json.arquivo || ''} não possui o campo \"NF:\".`\n  );\n}\n\nconst nfPepsico = matchNF[1];\n\n\n\n  // 2. NÚMERO DOCUMENTO RPS / NOTA MA2\n\n  const matchNfMa2 = texto.match(\n    /N[uú]mero\\s+da\\s+Nota[\\s\\S]*?(\\d{5,})\\s+\\d{2}\\/\\d{2}\\/\\d{4}/i\n  );\n\n  if (!matchNfMa2) {\n    throw new Error(\n      `Não foi possível encontrar o Número Documento RPS / Nota MA2 no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const nfMa2 = matchNfMa2[1];\n\n  // 3. DATA DE EMISSÃO\n\n  const matchDataEmissao = texto.match(\n    /\\d{5,}\\s+(\\d{2}\\/\\d{2}\\/\\d{4})\\s+\\d{2}:\\d{2}:\\d{2}/\n  );\n\n  if (!matchDataEmissao) {\n    throw new Error(\n      `Não foi possível encontrar a Data de Emissão no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const dataEmissao = matchDataEmissao[1];\n\n  // 4. VALOR TOTAL DO FRETE / SERVIÇO\n\n  const matchValorFrete = texto.match(\n    /VALOR\\s+TOTAL\\s+DO\\s+SERVI[CÇ]O\\s*=\\s*R\\$\\s*([\\d.]+,\\d{2})/i\n  );\n\n  if (!matchValorFrete) {\n    throw new Error(\n      `Não foi possível encontrar o Valor Total do Serviço no PDF ${item.json.arquivo || ''}.`\n    );\n  }\n\n  const valorTotalFrete = matchValorFrete[1].replace(/\\./g, '');\n\n// 5. NOME DA TARIFA\nlet matchNomeTarifa = texto.match(\n  /\\bEVENTO\\s+(\\S+)/i\n);\n\nif (!matchNomeTarifa) {\n  matchNomeTarifa = texto.match(\n    /\\bCARRETA\\s+(FRETE|REENTREGA|RETORNO|DESCARGA)\\b/i\n  );\n}\n\nconst nomeTarifa = matchNomeTarifa\n  ? matchNomeTarifa[1].toUpperCase()\n  : null;\n\n  resultados.push({\n    json: {\n      arquivo: item.json.arquivo,\n      caminho: item.json.caminho,\n      \"NF Remessa PepsiCo\": nfPepsico,\n      \"Número Documento RPS\": nfMa2,\n      \"Data Emissão\": dataEmissao,\n      \"Valor Total Frete\": valorTotalFrete,\n      \"Nome Tarifa\": nomeTarifa,\n      status: 'dados extraídos'\n    }\n  });\n}\n\nreturn resultados;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ],
+      "id": "474ddb2f-aac0-4182-80da-7fb52d3b3198",
+      "name": "EXTRAIR DADOS PDF1"
+    },
+    {
+      "parameters": {
+        "content": "## EXTRAIR DADOS PDF\nExtrai dados para guardar nas variaveis. \n\nOs principais detalhes são:\n- o uso de parenteses na regex para indicar o que será guardado na variavel\n- O uso de chaves para indicar o que é aceito em tal campo\n- .includes vendo o que tem na string\n",
+        "height": 480,
+        "width": 160
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        400,
+        -672
+      ],
+      "id": "00798ccb-7e75-4cd3-8b70-413dbb9dc2af",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "## ZIMBRA LOGIN\n\nEste node usa um HTTP Request para enviar uma requisição ao servidor do Zimbra.\n\nURL:\nhttps://webmail.jetmailx.com.br/service/soap\n\nHTTPS:\nÉ HTTP protegido por TLS. Criptografa a comunicação entre o n8n e o servidor, protegendo os dados durante o transporte.\n\nPOST:\nMétodo HTTP utilizado para enviar dados ao servidor.\n\nBody:\nContém uma mensagem SOAP estruturada em XML. O `AuthRequest` informa ao Zimbra a conta e a senha para autenticação.\n\nContent-Type:\n`application/xml` informa ao servidor que o conteúdo enviado no Body está no formato XML.\n\nSOAP:\nProtocolo/formato de comunicação entre sistemas que utiliza XML para estruturar mensagens.\n\nAuthRequest:\nSolicita ao Zimbra a autenticação da conta.\n\nSe a autenticação for aceita, o Zimbra retorna uma resposta contendo um token de autenticação, que será utilizado pelos próximos requests.",
+        "height": 896,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        576,
+        -1040
+      ],
+      "id": "69e80a83-2e5f-41e8-a140-70714575b609",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "## ZIMBRA BUSCAR NF\nBusca a NF usando algumas camadas de linguagem:\n- Utiliza `HTTPS` com o dominio para adquiri a URL\n- Usa o token recebido como crachá, fazendo login no Zimbra\n- Utilizando uma estrutura `XML`, envia um pedido de pesquisa para o zimbra. Esse processo é feito em partes:\n1. Envia um envelope `SOAP` com as informações\n2. Envia uma \"tag\" de `SearchRequest`.\n- Essa tag não é universal do XML, mas sim é interpretado pela `API`` do Zimbra. \n\nIndicamos que é a API do Zimbra usando o `xmlns=\"urn:zimbraMail\"` para dizer: `Essa tag existe na API de pesquisa do Zimbra`\n3. Por fim, enviamos o número da NF como assunto.\n- O número da NF contém linguagem n8n em:   ```{{ $('EXTRAIR DADOS PDF').item.json[\"NF Remessa PepsiCo\"]```\n- E a parte JavaScript para tirar os 0 automaticamente ``` .replace(/^0+/, '') ```",
+        "height": 976,
+        "width": 208,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        832,
+        -1120
+      ],
+      "id": "31d8a80c-8a76-49ca-ac3d-c6031007106d",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "## PEGAR ID DO EMAIL\nBusca a ```ID``` dentro do XML devolvido e guarda ela para uso posterior",
+        "height": 192,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        -352
+      ],
+      "id": "725a2d04-2a72-4a6e-9fa1-7bc107782d49",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "## ZIMBRA - PEGAR EMAIL\n\nÉ outro HTTP Request para a API SOAP do Zimbra.\n\nCookie:\nÉ um dado enviado pelo cliente ao servidor através de um Header HTTP. Pode ser usado para manter sessões e autenticação. Neste workflow, o cookie contém o `ZM_AUTH_TOKEN` obtido no login.\n\n`ZM_AUTH_TOKEN`:\nToken de autenticação fornecido pelo Zimbra após o login. Ele permite que os próximos requests sejam associados à sessão autenticada, sem precisar enviar a senha novamente.\n\nA expressão:\n`$(\"ZIMBRA LOGIN\").first().json[\"data\"]`\nacessa o primeiro item produzido pelo node `ZIMBRA LOGIN` e pega sua resposta.\n\n`.match(/<authToken>(.*?)<\\/authToken>/)[1]`\nprocura a tag `<authToken>` na resposta XML e pega o conteúdo dentro dela.\n\nBody:\n`GetMsgRequest` é uma operação definida pela API SOAP do Zimbra. Recebe o `messageId` encontrado na pesquisa anterior e solicita o conteúdo daquela mensagem.\n\n`<m id=\"...\"/>`:\ninforma ao Zimbra qual mensagem deve ser recuperada.",
+        "height": 928,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        -1056
+      ],
+      "id": "8a3628bc-875b-4ccf-bf77-92d3a36ebff5",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "## LOCALIZAR XML\nAqui localizamos exatamente **nome** e  **parte** do XML dentro do email pego no último code",
+        "height": 176,
+        "width": 166
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        -304
+      ],
+      "id": "ad51685c-f3d9-4340-a076-befd8964ac66",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "content": "## PEGAR XML\n\nGET\n\nid = 304323\npart = 2\nauth = qp (PARAMETRO QUERY)\nzauthtoken = TOKEN\ndisp = a (PEGAR COMO ATTACHMENT)",
+        "height": 224,
+        "width": 176,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        -352
+      ],
+      "id": "31543e5f-7bfa-4c80-a821-bb7ba1fdc6bb",
+      "name": "Sticky Note12"
+    },
+    {
+      "parameters": {
+        "content": "## EXTRAIR XML \nUsa o Extract from File para extrair o conteúdo do arquivo XML recebido pelo node anterior. O arquivo deixa de ser tratado apenas como um arquivo/binário e seu conteúdo XML fica disponível para os próximos nodes processarem.",
+        "height": 384,
+        "width": 150,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1888,
+        -496
+      ],
+      "id": "d9c88f1b-43dd-41a8-930f-dfbea662de1c",
+      "name": "Sticky Note13"
+    },
+    {
+      "parameters": {
+        "content": "## XML PARA JSON\nConverte o XML para JSON, facilitando uso dos dados \n\n## AJUSTAR CAMPOS\nComeça a formatar os campos que irão para o csv final (tantos dados relativos como fixos)",
+        "height": 256,
+        "color": "#491254"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        -400
+      ],
+      "id": "39d9b9a5-ee4f-433d-a563-8c7ae166d39d",
+      "name": "Sticky Note14"
+    },
+    {
+      "parameters": {
+        "content": "## EXTRAIR DADOS PDF1\nConverte os dados do PDF, para campos JSON úteis. As partes importantes são:\n- Uso de FALLBACKS - ```THROW NEW ERROR```\n- Regex validando datas\n- Regex com if para lidar com inconcistencias ",
+        "height": 224,
+        "width": 288
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        368
+      ],
+      "id": "95b70cb1-a6f8-468a-91df-01bf69d67aba",
+      "name": "Sticky Note15"
+    },
+    {
+      "parameters": {
+        "content": "## JUNTAR DADOS\nConecta os dados das duas fontes.",
+        "height": 128,
+        "width": 150,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        336
+      ],
+      "id": "6fc7dbd0-1b0f-4494-a4dd-02b91ec30abf",
+      "name": "Sticky Note17"
+    },
+    {
+      "parameters": {
+        "content": "## ORGANIZAR CSV\n\nRecebe os dados combinados das fontes PDF e XML, seleciona somente os 20 campos necessários para o CSV, normaliza campos como CNPJ, CEP e RPS removendo zeros iniciais, substitui valores null/undefined por vazio e organiza os campos na ordem exigida pelo Lupeon.\nUtiliza:\n- `MAP` para devolver um objeto organizado\n- `??` para verificar NULL e UNDEFINED",
+        "height": 368
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        -448
+      ],
+      "id": "0485191a-e4ee-4a7f-85f3-7009074da6f3",
+      "name": "Sticky Note18"
+    },
+    {
+      "parameters": {
+        "content": "## MAPEAR CSV\npercorre todos os itens recebidos e recria cada um contendo somente sua propriedade json. Não altera os valores nem a ordem dos campos; funciona principalmente como uma normalização da estrutura dos itens antes da geração do CSV. Sua necessidade deve ser validada comparando o workflow com e sem esse node.",
+        "height": 464,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2800,
+        336
+      ],
+      "id": "c6ba8f53-d60b-48fb-9eaa-d892325dbbea",
+      "name": "Sticky Note19"
+    },
+    {
+      "parameters": {
+        "content": "## LOOP OVER ITEMS: \n\nprocessa os itens individualmente, com Batch Size 1, garantindo que cada documento gere seu próprio CSV.\n\n## CONVERT TO FILE: \nconverte o JSON estruturado em arquivo CSV. O delimitador ; foi escolhido porque corresponde ao formato aceito pelo processo do Lupeon e evita conflito com valores que utilizam vírgula como separador decimal. O nome do arquivo é construído dinamicamente a partir do Número Documento RPS.",
+        "height": 256,
+        "width": 448,
+        "color": "#491254"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3024,
+        -96
+      ],
+      "id": "2077f6a5-5fbe-4b53-9f7b-3dda0774e621",
+      "name": "Sticky Note20"
+    },
+    {
+      "parameters": {
+        "content": "## SALVAR CSV\n```powershell -NoProfile -Command \"...\"```\n- Abra o PowerShell, sem carregar perfil, e execute o que está entre aspas.\n```$bytes=[Convert]::FromBase64String('{{ $json.base64CSV }}')```\n- \"Crie uma variável chamada $bytes e coloque nela os bytes obtidos ao decodificar o Base64 do CSV.\"\n```[IO.File]::WriteAllBytes('{{ $json.caminhoCSV }}',$bytes) ```\n- Escreves todos os bytes da variavel \"bytes\" (que contém os dados) e joga no caminho especificado pela sintaxe n8n",
+        "height": 320,
+        "width": 358,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3600,
+        -128
+      ],
+      "id": "bd73c96c-83f5-4451-a2a8-b4d3c27d0576",
+      "name": "Sticky Note22"
+    },
+    {
+      "parameters": {
+        "content": "## MOVER PDF\nExecuta comandos powershell nessa ordem: \n- Cria o caminho e nome do pdf\n- Verifica se esse pdf realmente existem em z:/\n- Caso sim, move para o novo local",
+        "height": 224,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3984,
+        416
+      ],
+      "id": "7bd06bdb-6397-491f-b80b-c9387cde75ef",
+      "name": "Sticky Note23"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8ad57931-4c1e-46ce-ba39-dbb95bf05228",
+              "leftValue": "={{ $json.text }}\n\n\n",
+              "rightValue": "EVENTO DESLOCAMENTO",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -48,
+        16
+      ],
+      "id": "a6d8a63b-7ae8-4bd9-91c1-4968370b8f58",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "content": "## PREPARAR ARQUIVO\nÉ um code responsavel pela infraestrutura do arquivo no operacional da máquina. Então trabalha com caminhos, buffer, bytes e etc.\n- ?. → optional chaining\n- await → espera uma operação assíncrona\nthis.helpers.getBinaryData- Buffer() → ferramenta do n8n para recuperar o arquivo como Buffer\n- Buffer → dados binários em memória\n- ...item.json → spread, preserva campos existentes\n- Buffer → Base64\n- montagem de caminhos Windows/UNC",
+        "height": 512
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3456,
+        400
+      ],
+      "id": "86c60d97-2c63-4c36-b9bc-d8503bcf89a0",
+      "name": "Sticky Note21"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2560,
+        160
+      ],
+      "id": "cb94f2c4-aadc-4090-86ec-0d5b440853b0",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "VERIFICAR PASTA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VERIFICAR PASTA": {
+      "main": [
+        [
+          {
+            "node": "ESCOLHER PDFS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESCOLHER PDFS": {
+      "main": [
+        [
+          {
+            "node": "LER PDFS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LER PDFS": {
+      "main": [
+        [
+          {
+            "node": "CRIAR BINARY PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRIAR BINARY PDF": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR TEXTO PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR TEXTO PDF": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR DADOS PDF": {
+      "main": [
+        [
+          {
+            "node": "ZIMBRA LOGIN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ZIMBRA LOGIN": {
+      "main": [
+        [
+          {
+            "node": "ZIMBRA BUSCAR NF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ZIMBRA BUSCAR NF": {
+      "main": [
+        [
+          {
+            "node": "PEGAR ID DO EMAIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML PARA JSON": {
+      "main": [
+        [
+          {
+            "node": "AJUSTAR CAMPOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AJUSTAR CAMPOS": {
+      "main": [
+        [
+          {
+            "node": "JUNTAR DADOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JUNTAR DADOS": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "PEGAR ID DO EMAIL": {
+      "main": [
+        [
+          {
+            "node": "ZIMBRA PEGAR EMAIL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ZIMBRA PEGAR EMAIL": {
+      "main": [
+        [
+          {
+            "node": "LOCALIZAR XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOCALIZAR XML": {
+      "main": [
+        [
+          {
+            "node": "PEGAR XML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PEGAR XML1": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VALIDAR NFS-E": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR DADOS PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR XML": {
+      "main": [
+        [
+          {
+            "node": "XML PARA JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GERAR CSV": {
+      "main": [
+        [
+          {
+            "node": "PREPARAR ARQUIVO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "GERAR CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MAPEAR CSV": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ORGANIZAR CSV": {
+      "main": [
+        [
+          {
+            "node": "MAPEAR CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARAR ARQUIVO": {
+      "main": [
+        [
+          {
+            "node": "SALVAR CSCV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SALVAR CSCV": {
+      "main": [
+        [
+          {
+            "node": "MOVER PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MOVER PDF": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AJUSTAR CAMPOS DESLOCAMENTO": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR DADOS DESLOCAMENTO VAZIO": {
+      "main": [
+        [
+          {
+            "node": "AJUSTAR CAMPOS DESLOCAMENTO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EXTRAIR DADOS PDF1": {
+      "main": [
+        [
+          {
+            "node": "JUNTAR DADOS",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "EXTRAIR DADOS DESLOCAMENTO VAZIO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VALIDAR NFS-E",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "EXTRAIR DADOS PDF1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "ORGANIZAR CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4eafb836-0e0e-4982-ab85-deababf7c0ea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "430c8a584af68a5fa0d5cd8f68febaef16d1a9ef653c77beb0202656504c0ea1"
+  },
+  "nodeGroups": [],
+  "id": "BHgwPSR57jO1wyEo",
+  "tags": []
+}
